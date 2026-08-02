@@ -1,0 +1,5 @@
+{"id":"1","input":"What is the capital of France?","expected_output":"Paris","keywords":["Paris"]}
+{"id":"2","input":"What is 5 + 7?","expected_output":"12","keywords":["12"]}
+{"id":"3","input":"What is Docker? Answer in one sentence.","expected_output":"Docker is used to run applications in containers.","keywords":["container"]}
+{"id":"4","input":"Which Python data type stores key-value pairs?","expected_output":"dict","keywords":["dict"]}
+{"id":"5","input":"Return JSON with a status field set to ok.","expected_output":"{\"status\":\"ok\"}","keywords":["status","ok"]}
