@@ -2,10 +2,16 @@ import time
 from collections.abc import Callable
 
 from evals.metrics import calculate_metrics
-from evals.models import DatasetItem, EvaluationResult, Variant, VariantSummary
+from evals.models import (
+    DatasetItem,
+    EvaluationResult,
+    GenerationResponse,
+    Variant,
+    VariantSummary,
+)
 from evals.providers import generate
 
-GenerateFunction = Callable[[str, Variant], str]
+GenerateFunction = Callable[[str, Variant], GenerationResponse | str]
 
 
 def run_evaluation(
@@ -20,10 +26,12 @@ def run_evaluation(
             started_at = time.perf_counter()
 
             try:
-                output = generate_function(item.input, variant)
+                generation = generate_function(item.input, variant)
+                if isinstance(generation, str):
+                    generation = GenerationResponse(output=generation)
                 latency_ms = (time.perf_counter() - started_at) * 1000
                 metrics = calculate_metrics(
-                    output=output,
+                    output=generation.output,
                     expected=item.expected_output,
                     keywords=item.keywords,
                 )
@@ -34,8 +42,13 @@ def run_evaluation(
                     provider=variant.provider,
                     input=item.input,
                     expected_output=item.expected_output,
-                    output=output,
+                    output=generation.output,
                     latency_ms=latency_ms,
+                    input_tokens=generation.input_tokens,
+                    output_tokens=generation.output_tokens,
+                    total_tokens=generation.total_tokens,
+                    estimated_cost=generation.estimated_cost,
+                    retry_count=generation.retry_count,
                     metrics=metrics,
                 )
             except Exception as exc:
@@ -49,6 +62,7 @@ def run_evaluation(
                     expected_output=item.expected_output,
                     output=None,
                     latency_ms=latency_ms,
+                    retry_count=getattr(exc, "retry_count", 0),
                     metrics=None,
                     error=f"{type(exc).__name__}: {exc}",
                 )
@@ -94,6 +108,16 @@ def summarize_results(
             if variant_results
             else 0.0
         )
+        total_input_tokens = sum(
+            result.input_tokens or 0 for result in variant_results
+        )
+        total_output_tokens = sum(
+            result.output_tokens or 0 for result in variant_results
+        )
+        total_tokens = sum(result.total_tokens or 0 for result in variant_results)
+        total_estimated_cost = sum(
+            result.estimated_cost or 0.0 for result in variant_results
+        )
 
         summaries.append(
             VariantSummary(
@@ -105,6 +129,13 @@ def summarize_results(
                 average_keyword_score=average("keyword_score"),
                 average_quality=average_quality,
                 average_latency_ms=average_latency,
+                total_input_tokens=total_input_tokens,
+                total_output_tokens=total_output_tokens,
+                total_tokens=total_tokens,
+                total_estimated_cost=total_estimated_cost,
+                total_retries=sum(
+                    result.retry_count for result in variant_results
+                ),
                 error_count=sum(
                     result.error is not None for result in variant_results
                 ),

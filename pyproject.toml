@@ -4,12 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-evaluation-platform"
-version = "0.1.0"
-description = "A lightweight CLI for evaluating and comparing LLM variants"
+version = "0.4.0"
+description = "A lightweight CLI for evaluating Llama 3.3 70B on GroqCloud"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "litellm>=1.93,<2",
     "pydantic>=2.10,<3",
+    "python-dotenv>=1.1,<2",
     "rich>=13.9,<15",
 ]
 
