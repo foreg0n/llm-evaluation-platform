@@ -1,10 +1,11 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
 from evals.models import GenerationResponse, Variant
 from evals.providers import (
-    LLMProvider,
+    AsyncLLMProvider,
     LiteLLMProvider,
     ProviderExecutionError,
 )
@@ -26,7 +27,7 @@ def make_response(content: str = "Paris") -> SimpleNamespace:
 def test_litellm_provider_maps_output_usage_cost_and_options() -> None:
     calls: list[dict[str, object]] = []
 
-    def completion(**kwargs: object) -> SimpleNamespace:
+    async def completion(**kwargs: object) -> SimpleNamespace:
         calls.append(kwargs)
         return make_response()
 
@@ -34,7 +35,7 @@ def test_litellm_provider_maps_output_usage_cost_and_options() -> None:
         completion_function=completion,
         cost_function=lambda **kwargs: 0.0012,
     )
-    assert isinstance(provider, LLMProvider)
+    assert isinstance(provider, AsyncLLMProvider)
     variant = Variant(
         name="real",
         model="groq/qwen/qwen3.6-27b",
@@ -44,7 +45,7 @@ def test_litellm_provider_maps_output_usage_cost_and_options() -> None:
         max_tokens=100,
     )
 
-    response = provider.generate("Capital of France?", variant)
+    response = asyncio.run(provider.generate("Capital of France?", variant))
 
     assert response.output == "Paris"
     assert response.input_tokens == 10
@@ -65,17 +66,20 @@ def test_litellm_provider_retries_timeout_without_network() -> None:
     attempts = 0
     delays: list[float] = []
 
-    def completion(**kwargs: object) -> SimpleNamespace:
+    async def completion(**kwargs: object) -> SimpleNamespace:
         nonlocal attempts
         attempts += 1
         if attempts < 3:
             raise TimeoutError("temporary timeout")
         return make_response("Recovered")
 
+    async def sleep(seconds: float) -> None:
+        delays.append(seconds)
+
     provider = LiteLLMProvider(
         completion_function=completion,
         cost_function=lambda **kwargs: 0.0,
-        sleep_function=delays.append,
+        sleep_function=sleep,
     )
     variant = Variant(
         name="real",
@@ -84,7 +88,7 @@ def test_litellm_provider_retries_timeout_without_network() -> None:
         max_retries=2,
     )
 
-    response = provider.generate("Question", variant)
+    response = asyncio.run(provider.generate("Question", variant))
 
     assert response.output == "Recovered"
     assert response.retry_count == 2
@@ -95,14 +99,17 @@ def test_litellm_provider_retries_timeout_without_network() -> None:
 def test_litellm_provider_reports_exhausted_retries() -> None:
     attempts = 0
 
-    def completion(**kwargs: object) -> SimpleNamespace:
+    async def completion(**kwargs: object) -> SimpleNamespace:
         nonlocal attempts
         attempts += 1
         raise TimeoutError("provider timeout")
 
+    async def no_sleep(seconds: float) -> None:
+        return None
+
     provider = LiteLLMProvider(
         completion_function=completion,
-        sleep_function=lambda seconds: None,
+        sleep_function=no_sleep,
     )
     variant = Variant(
         name="real",
@@ -112,7 +119,7 @@ def test_litellm_provider_reports_exhausted_retries() -> None:
     )
 
     with pytest.raises(ProviderExecutionError) as error:
-        provider.generate("Question", variant)
+        asyncio.run(provider.generate("Question", variant))
 
     assert error.value.retry_count == 2
     assert attempts == 3

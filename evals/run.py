@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import json
 import os
 from collections.abc import Sequence
@@ -22,6 +23,13 @@ DEFAULT_GROQ_MODELS = (
 )
 
 
+def positive_int(value: str) -> int:
+    parsed_value = int(value)
+    if parsed_value < 1:
+        raise argparse.ArgumentTypeError("value must be at least 1")
+    return parsed_value
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare Groq-hosted models against a JSONL dataset."
@@ -40,6 +48,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--system-prompt")
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--max-retries", type=int, default=2)
+    parser.add_argument(
+        "--concurrency",
+        type=positive_int,
+        default=3,
+        help="Maximum number of concurrent model requests (default: 3).",
+    )
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_ARTIFACT_PATH)
     return parser.parse_args(argv)
@@ -111,7 +125,7 @@ def save_report(report: EvaluationReport, path: Path) -> None:
     )
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+async def async_main(argv: Sequence[str] | None = None) -> None:
     load_dotenv(PROJECT_ROOT / ".env")
     args = parse_args(argv)
     try:
@@ -122,7 +136,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     output_path = args.output.resolve()
 
     dataset = load_dataset(dataset_path)
-    results = run_evaluation(dataset, variants)
+    results = await run_evaluation(
+        dataset,
+        variants,
+        concurrency=args.concurrency,
+    )
     summaries = summarize_results(results, variants)
     run_id = datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -138,6 +156,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     console = Console()
     console.print(build_table(summaries))
     console.print(f"\nReport saved to: [green]{output_path}[/green]")
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    asyncio.run(async_main(argv))
 
 
 if __name__ == "__main__":

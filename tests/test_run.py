@@ -8,7 +8,8 @@ def test_default_cli_builds_two_comparison_variants(
 ) -> None:
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
 
-    variants = build_variants(parse_args([]))
+    args = parse_args([])
+    variants = build_variants(args)
 
     assert [variant.model for variant in variants] == list(
         DEFAULT_GROQ_MODELS
@@ -18,6 +19,7 @@ def test_default_cli_builds_two_comparison_variants(
         "openai/gpt-oss-20b",
     ]
     assert all(variant.provider == "litellm" for variant in variants)
+    assert args.concurrency == 3
 
 
 def test_cli_accepts_repeated_model_overrides(
@@ -53,3 +55,8 @@ def test_cli_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ValueError, match="GROQ_API_KEY"):
         build_variants(args)
+
+
+def test_cli_rejects_invalid_concurrency() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--concurrency", "0"])

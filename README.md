@@ -7,6 +7,7 @@ GroqCloud against a reusable JSONL dataset.
 
 - Real GroqCloud API calls through LiteLLM
 - Qwen 3.6 27B and GPT-OSS 20B compared in every default run
+- Asynchronous requests with configurable concurrency
 - A shared provider protocol for clean model integration
 - JSONL dataset loading and Pydantic validation
 - Exact match, normalized exact match, and keyword coverage metrics
@@ -92,8 +93,11 @@ The included dataset contains five items, so the default comparison produces
 ten real API requests per run.
 
 ```bash
-python -m evals.run
+python -m evals.run --concurrency 3
 ```
+
+`--concurrency` controls the maximum number of in-flight model requests. Its
+default value is `3`; lower it if Groq returns rate-limit errors.
 
 Override request settings when necessary:
 
@@ -103,7 +107,8 @@ python -m evals.run \
   --max-tokens 500 \
   --system-prompt "Answer accurately and concisely." \
   --timeout 30 \
-  --max-retries 2
+  --max-retries 2 \
+  --concurrency 3
 ```
 
 To compare a custom model set, repeat `--model`:
@@ -164,13 +169,19 @@ values remain available in the JSON report.
 The runner depends on a small shared interface:
 
 ```python
-class LLMProvider(Protocol):
-    def generate(self, prompt: str, variant: Variant) -> GenerationResponse:
+class AsyncLLMProvider(Protocol):
+    async def generate(
+        self,
+        prompt: str,
+        variant: Variant,
+    ) -> GenerationResponse:
         ...
 ```
 
-`LiteLLMProvider` implements this interface and maps a Groq completion into the
-project's `GenerationResponse`, including token and cost data. Temporary
+`LiteLLMProvider` implements this interface with `litellm.acompletion` and maps
+a Groq completion into the project's `GenerationResponse`, including token and
+cost data. The runner creates one task per dataset-item/model pair and uses an
+`asyncio.Semaphore` to enforce the requested concurrency limit. Temporary
 connection, timeout, rate-limit, server, and invalid-response failures use
 bounded exponential backoff. Authentication and validation errors fail
 immediately, while the runner records the error and continues with later items.

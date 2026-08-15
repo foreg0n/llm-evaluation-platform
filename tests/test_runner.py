@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from evals.models import DatasetItem, GenerationResponse, Variant
@@ -16,7 +18,10 @@ def test_runner_keeps_successful_result() -> None:
     ]
     variants = [Variant(name="test", model="test")]
 
-    results = run_evaluation(dataset, variants, lambda prompt, variant: "12")
+    async def generate(prompt: str, variant: Variant) -> str:
+        return "12"
+
+    results = asyncio.run(run_evaluation(dataset, variants, generate))
 
     assert len(results) == 1
     assert results[0].error is None
@@ -34,10 +39,12 @@ def test_runner_isolates_provider_error() -> None:
     ]
     variants = [Variant(name="broken", model="broken")]
 
-    def broken_provider(prompt: str, variant: Variant) -> str:
+    async def broken_provider(prompt: str, variant: Variant) -> str:
         raise TimeoutError("provider timeout")
 
-    results = run_evaluation(dataset, variants, broken_provider)
+    results = asyncio.run(
+        run_evaluation(dataset, variants, broken_provider)
+    )
 
     assert len(results) == 1
     assert results[0].output is None
@@ -51,7 +58,7 @@ def test_runner_continues_after_one_provider_error() -> None:
     ]
     variants = [Variant(name="real", model="real")]
 
-    def sometimes_fails(
+    async def sometimes_fails(
         prompt: str,
         variant: Variant,
     ) -> GenerationResponse:
@@ -59,7 +66,9 @@ def test_runner_continues_after_one_provider_error() -> None:
             raise ProviderExecutionError("TimeoutError: timeout", retry_count=2)
         return GenerationResponse(output="Answer")
 
-    results = run_evaluation(dataset, variants, sometimes_fails)
+    results = asyncio.run(
+        run_evaluation(dataset, variants, sometimes_fails)
+    )
 
     assert len(results) == 2
     assert results[0].error is not None
@@ -79,17 +88,21 @@ def test_runner_saves_usage_cost_and_retries() -> None:
     ]
     variants = [Variant(name="real", model="real")]
 
-    results = run_evaluation(
-        dataset,
-        variants,
-        lambda prompt, variant: GenerationResponse(
+    async def generate(
+        prompt: str,
+        variant: Variant,
+    ) -> GenerationResponse:
+        return GenerationResponse(
             output="Answer",
             input_tokens=8,
             output_tokens=2,
             total_tokens=10,
             estimated_cost=0.001,
             retry_count=1,
-        ),
+        )
+
+    results = asyncio.run(
+        run_evaluation(dataset, variants, generate)
     )
     summary = summarize_results(results, variants)
 
@@ -111,13 +124,60 @@ def test_summary_aggregates_results() -> None:
         )
     ]
     variants = [Variant(name="test", model="test")]
-    results = run_evaluation(
-        dataset,
-        variants,
-        lambda prompt, variant: "Answer",
+
+    async def generate(prompt: str, variant: Variant) -> str:
+        return "Answer"
+
+    results = asyncio.run(
+        run_evaluation(dataset, variants, generate)
     )
 
     summary = summarize_results(results, variants)
 
     assert summary[0].average_quality == 1.0
     assert summary[0].error_count == 0
+
+
+def test_runner_limits_concurrency() -> None:
+    dataset = [
+        DatasetItem(
+            id=str(index),
+            input=f"Question {index}",
+            expected_output="Answer",
+        )
+        for index in range(6)
+    ]
+    variants = [Variant(name="test", model="test")]
+    active_requests = 0
+    maximum_active_requests = 0
+
+    async def tracked_provider(
+        prompt: str,
+        variant: Variant,
+    ) -> str:
+        nonlocal active_requests, maximum_active_requests
+        active_requests += 1
+        maximum_active_requests = max(
+            maximum_active_requests,
+            active_requests,
+        )
+        await asyncio.sleep(0.01)
+        active_requests -= 1
+        return "Answer"
+
+    results = asyncio.run(
+        run_evaluation(
+            dataset,
+            variants,
+            tracked_provider,
+            concurrency=2,
+        )
+    )
+
+    assert len(results) == 6
+    assert maximum_active_requests == 2
+
+
+def test_runner_rejects_invalid_concurrency() -> None:
+    with pytest.raises(ValueError, match="at least 1"):
+        asyncio.run(run_evaluation([], [], concurrency=0))

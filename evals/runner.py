@@ -1,5 +1,6 @@
+import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from evals.metrics import calculate_metrics
 from evals.models import (
@@ -11,65 +12,80 @@ from evals.models import (
 )
 from evals.providers import generate
 
-GenerateFunction = Callable[[str, Variant], GenerationResponse | str]
+GenerateFunction = Callable[
+    [str, Variant],
+    Awaitable[GenerationResponse | str],
+]
 
 
-def run_evaluation(
+async def _evaluate_one(
+    item: DatasetItem,
+    variant: Variant,
+    generate_function: GenerateFunction,
+    semaphore: asyncio.Semaphore,
+) -> EvaluationResult:
+    async with semaphore:
+        started_at = time.perf_counter()
+
+        try:
+            generation = await generate_function(item.input, variant)
+            if isinstance(generation, str):
+                generation = GenerationResponse(output=generation)
+            latency_ms = (time.perf_counter() - started_at) * 1000
+            metrics = calculate_metrics(
+                output=generation.output,
+                expected=item.expected_output,
+                keywords=item.keywords,
+            )
+            return EvaluationResult(
+                item_id=item.id,
+                variant_name=variant.name,
+                model=variant.model,
+                provider=variant.provider,
+                input=item.input,
+                expected_output=item.expected_output,
+                output=generation.output,
+                latency_ms=latency_ms,
+                input_tokens=generation.input_tokens,
+                output_tokens=generation.output_tokens,
+                total_tokens=generation.total_tokens,
+                estimated_cost=generation.estimated_cost,
+                retry_count=generation.retry_count,
+                metrics=metrics,
+            )
+        except Exception as exc:
+            latency_ms = (time.perf_counter() - started_at) * 1000
+            return EvaluationResult(
+                item_id=item.id,
+                variant_name=variant.name,
+                model=variant.model,
+                provider=variant.provider,
+                input=item.input,
+                expected_output=item.expected_output,
+                output=None,
+                latency_ms=latency_ms,
+                retry_count=getattr(exc, "retry_count", 0),
+                metrics=None,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+
+async def run_evaluation(
     dataset: list[DatasetItem],
     variants: list[Variant],
     generate_function: GenerateFunction = generate,
+    concurrency: int = 3,
 ) -> list[EvaluationResult]:
-    results: list[EvaluationResult] = []
+    if concurrency < 1:
+        raise ValueError("concurrency must be at least 1")
 
-    for item in dataset:
-        for variant in variants:
-            started_at = time.perf_counter()
-
-            try:
-                generation = generate_function(item.input, variant)
-                if isinstance(generation, str):
-                    generation = GenerationResponse(output=generation)
-                latency_ms = (time.perf_counter() - started_at) * 1000
-                metrics = calculate_metrics(
-                    output=generation.output,
-                    expected=item.expected_output,
-                    keywords=item.keywords,
-                )
-                result = EvaluationResult(
-                    item_id=item.id,
-                    variant_name=variant.name,
-                    model=variant.model,
-                    provider=variant.provider,
-                    input=item.input,
-                    expected_output=item.expected_output,
-                    output=generation.output,
-                    latency_ms=latency_ms,
-                    input_tokens=generation.input_tokens,
-                    output_tokens=generation.output_tokens,
-                    total_tokens=generation.total_tokens,
-                    estimated_cost=generation.estimated_cost,
-                    retry_count=generation.retry_count,
-                    metrics=metrics,
-                )
-            except Exception as exc:
-                latency_ms = (time.perf_counter() - started_at) * 1000
-                result = EvaluationResult(
-                    item_id=item.id,
-                    variant_name=variant.name,
-                    model=variant.model,
-                    provider=variant.provider,
-                    input=item.input,
-                    expected_output=item.expected_output,
-                    output=None,
-                    latency_ms=latency_ms,
-                    retry_count=getattr(exc, "retry_count", 0),
-                    metrics=None,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-
-            results.append(result)
-
-    return results
+    semaphore = asyncio.Semaphore(concurrency)
+    tasks = [
+        _evaluate_one(item, variant, generate_function, semaphore)
+        for item in dataset
+        for variant in variants
+    ]
+    return list(await asyncio.gather(*tasks))
 
 
 def summarize_results(

@@ -1,12 +1,12 @@
-import time
-from collections.abc import Callable, Mapping
+import asyncio
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from evals.models import GenerationResponse, Variant
 
-CompletionFunction = Callable[..., Any]
+AsyncCompletionFunction = Callable[..., Awaitable[Any]]
 CostFunction = Callable[..., float]
-SleepFunction = Callable[[float], None]
+AsyncSleepFunction = Callable[[float], Awaitable[None]]
 
 
 class ProviderExecutionError(RuntimeError):
@@ -22,16 +22,20 @@ class InvalidProviderResponseError(RuntimeError):
 
 
 @runtime_checkable
-class LLMProvider(Protocol):
-    def generate(self, prompt: str, variant: Variant) -> GenerationResponse:
+class AsyncLLMProvider(Protocol):
+    async def generate(
+        self,
+        prompt: str,
+        variant: Variant,
+    ) -> GenerationResponse:
         """Generate one response for a rendered prompt."""
         ...
 
 
-def _default_completion(**kwargs: Any) -> Any:
-    from litellm import completion
+async def _default_acompletion(**kwargs: Any) -> Any:
+    from litellm import acompletion
 
-    return completion(**kwargs)
+    return await acompletion(**kwargs)
 
 
 def _default_completion_cost(**kwargs: Any) -> float:
@@ -41,25 +45,29 @@ def _default_completion_cost(**kwargs: Any) -> float:
 
 
 class LiteLLMProvider:
-    """Real LLM provider backed by LiteLLM's unified completion API."""
+    """Async provider backed by LiteLLM's unified completion API."""
 
     def __init__(
         self,
-        completion_function: CompletionFunction = _default_completion,
+        completion_function: AsyncCompletionFunction = _default_acompletion,
         cost_function: CostFunction = _default_completion_cost,
-        sleep_function: SleepFunction = time.sleep,
+        sleep_function: AsyncSleepFunction = asyncio.sleep,
     ) -> None:
         self._completion = completion_function
         self._completion_cost = cost_function
         self._sleep = sleep_function
 
-    def generate(self, prompt: str, variant: Variant) -> GenerationResponse:
+    async def generate(
+        self,
+        prompt: str,
+        variant: Variant,
+    ) -> GenerationResponse:
         messages = self._build_messages(prompt, variant.system_prompt)
         retry_count = 0
 
         while True:
             try:
-                response = self._completion(
+                response = await self._completion(
                     model=variant.model,
                     messages=messages,
                     temperature=variant.temperature,
@@ -84,7 +92,7 @@ class LiteLLMProvider:
 
                 delay_seconds = min(2**retry_count, 8)
                 retry_count += 1
-                self._sleep(delay_seconds)
+                await self._sleep(delay_seconds)
 
     @staticmethod
     def _build_messages(
@@ -172,13 +180,13 @@ class LiteLLMProvider:
         ) or type(exc).__name__ in retryable_names
 
 
-DEFAULT_PROVIDER: LLMProvider = LiteLLMProvider()
+DEFAULT_PROVIDER: AsyncLLMProvider = LiteLLMProvider()
 
 
-def generate(
+async def generate(
     prompt: str,
     variant: Variant,
-    provider: LLMProvider | None = None,
+    provider: AsyncLLMProvider | None = None,
 ) -> GenerationResponse:
     active_provider = provider or DEFAULT_PROVIDER
-    return active_provider.generate(prompt, variant)
+    return await active_provider.generate(prompt, variant)
