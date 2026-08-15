@@ -37,7 +37,7 @@ def test_litellm_provider_maps_output_usage_cost_and_options() -> None:
     assert isinstance(provider, LLMProvider)
     variant = Variant(
         name="real",
-        model="groq/llama-3.3-70b-versatile",
+        model="groq/qwen/qwen3.6-27b",
         provider="litellm",
         system_prompt="Answer briefly.",
         timeout_seconds=5,
@@ -51,7 +51,7 @@ def test_litellm_provider_maps_output_usage_cost_and_options() -> None:
     assert response.output_tokens == 2
     assert response.total_tokens == 12
     assert response.estimated_cost == pytest.approx(0.0012)
-    assert calls[0]["model"] == "groq/llama-3.3-70b-versatile"
+    assert calls[0]["model"] == "groq/qwen/qwen3.6-27b"
     assert calls[0]["timeout"] == 5
     assert calls[0]["max_tokens"] == 100
     assert calls[0]["num_retries"] == 0
@@ -79,7 +79,7 @@ def test_litellm_provider_retries_timeout_without_network() -> None:
     )
     variant = Variant(
         name="real",
-        model="groq/llama-3.3-70b-versatile",
+        model="groq/openai/gpt-oss-20b",
         provider="litellm",
         max_retries=2,
     )
@@ -106,7 +106,7 @@ def test_litellm_provider_reports_exhausted_retries() -> None:
     )
     variant = Variant(
         name="real",
-        model="groq/llama-3.3-70b-versatile",
+        model="groq/openai/gpt-oss-20b",
         provider="litellm",
         max_retries=2,
     )

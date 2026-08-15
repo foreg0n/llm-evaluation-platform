@@ -16,21 +16,25 @@ from evals.runner import run_evaluation, summarize_results
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATASET_PATH = PROJECT_ROOT / "evals" / "datasets" / "questions.jsonl"
 DEFAULT_ARTIFACT_PATH = PROJECT_ROOT / "artifacts" / "results.json"
-DEFAULT_GROQ_MODEL = "groq/llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODELS = (
+    "groq/qwen/qwen3.6-27b",
+    "groq/openai/gpt-oss-20b",
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate Llama 3.3 70B on Groq against a JSONL dataset."
+        description="Compare Groq-hosted models against a JSONL dataset."
     )
     parser.add_argument(
         "--model",
+        dest="models",
+        action="append",
         help=(
-            "Groq model identifier. Defaults to GROQ_MODEL or "
-            f"{DEFAULT_GROQ_MODEL}."
+            "Groq model identifier. Repeat this option to compare multiple "
+            "models. Defaults to Qwen 3.6 27B and GPT-OSS 20B."
         ),
     )
-    parser.add_argument("--name", help="Display name for a real model variant.")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=500)
     parser.add_argument("--system-prompt")
@@ -48,24 +52,27 @@ def build_variants(args: argparse.Namespace) -> list[Variant]:
             "https://console.groq.com/keys and add it to .env"
         )
 
-    model = args.model or os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
-    if "/" not in model:
-        model = f"groq/{model}"
-    if not model.startswith("groq/"):
-        raise ValueError("Only Groq models are supported; use groq/<model>")
+    models = args.models or DEFAULT_GROQ_MODELS
+    variants: list[Variant] = []
 
-    return [
-        Variant(
-            name=args.name or model.removeprefix("groq/"),
-            model=model,
-            provider="litellm",
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            system_prompt=args.system_prompt,
-            timeout_seconds=args.timeout,
-            max_retries=args.max_retries,
+    for model in models:
+        normalized_model = (
+            model if model.startswith("groq/") else f"groq/{model}"
         )
-    ]
+        variants.append(
+            Variant(
+                name=normalized_model.removeprefix("groq/"),
+                model=normalized_model,
+                provider="litellm",
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+                system_prompt=args.system_prompt,
+                timeout_seconds=args.timeout,
+                max_retries=args.max_retries,
+            )
+        )
+
+    return variants
 
 
 def build_table(summaries: list[VariantSummary]) -> Table:

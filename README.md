@@ -1,12 +1,12 @@
 # LLM Evaluation Platform
 
-A lightweight command-line framework for evaluating Llama 3.3 70B through
+A lightweight command-line framework for comparing real language models on
 GroqCloud against a reusable JSONL dataset.
 
 ## Features
 
 - Real GroqCloud API calls through LiteLLM
-- Llama 3.3 70B Versatile as the default model
+- Qwen 3.6 27B and GPT-OSS 20B compared in every default run
 - A shared provider protocol for clean model integration
 - JSONL dataset loading and Pydantic validation
 - Exact match, normalized exact match, and keyword coverage metrics
@@ -15,14 +15,6 @@ GroqCloud against a reusable JSONL dataset.
 - Error isolation: one failed request does not stop the evaluation run
 - Rich terminal summary and a reproducible JSON report
 - Network-free tests using mocked Groq responses
-
-## Model Availability Notice
-
-This project uses `llama-3.3-70b-versatile` as requested. Groq has announced
-that this model will be shut down for free and developer tiers on August 16,
-2026. Enterprise customers with committed spend are not affected. See Groq's
-[model deprecation page](https://console.groq.com/docs/deprecations) before
-deploying the project.
 
 ## Requirements
 
@@ -84,7 +76,6 @@ cp .env.example .env
 
 ```dotenv
 GROQ_API_KEY=your-secret-groq-key
-GROQ_MODEL=groq/llama-3.3-70b-versatile
 ```
 
 The `.env` file is ignored by Git. Never commit, publish, or share your API
@@ -92,7 +83,13 @@ key. Revoke it immediately in the GroqCloud Console if it is exposed.
 
 ## Running an Evaluation
 
-The included dataset currently produces five real API requests per run.
+The default run compares these two models:
+
+- `groq/qwen/qwen3.6-27b`
+- `groq/openai/gpt-oss-20b`
+
+The included dataset contains five items, so the default comparison produces
+ten real API requests per run.
 
 ```bash
 python -m evals.run
@@ -102,8 +99,6 @@ Override request settings when necessary:
 
 ```bash
 python -m evals.run \
-  --model groq/llama-3.3-70b-versatile \
-  --name llama-3.3-70b \
   --temperature 0 \
   --max-tokens 500 \
   --system-prompt "Answer accurately and concisely." \
@@ -111,8 +106,15 @@ python -m evals.run \
   --max-retries 2
 ```
 
-The Groq prefix can be omitted: `--model llama-3.3-70b-versatile` is
-automatically converted to `groq/llama-3.3-70b-versatile`. Run
+To compare a custom model set, repeat `--model`:
+
+```bash
+python -m evals.run \
+  --model qwen/qwen3.6-27b \
+  --model openai/gpt-oss-20b
+```
+
+The LiteLLM `groq/` prefix is optional and is added automatically. Run
 `python -m evals.run --help` for all options.
 
 The terminal displays an aggregate summary. The complete report is written to
@@ -196,8 +198,8 @@ llm-evaluation-platform/
 
 ## Current Scope
 
-This repository contains the synchronous CLI evaluation core for Llama 3.3
-70B on GroqCloud. It does not yet include a web API, persistent storage,
+This repository contains the synchronous CLI evaluation core for comparing
+models on GroqCloud. It does not yet include a web API, persistent storage,
 background workers, distributed rate limiting, or a frontend.
 
 Possible next steps include async concurrency, FastAPI, PostgreSQL, experiment
