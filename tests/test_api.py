@@ -30,3 +30,20 @@ def test_health_checks_database_without_real_postgres() -> None:
     assert response.json() == {"status": "ok", "database": "reachable"}
     assert session.executed_statement == "SELECT 1"
 
+
+def test_local_frontend_origin_is_allowed_by_cors() -> None:
+    app = create_app()
+
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/v1/projects",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == (
+        "http://localhost:3000"
+    )

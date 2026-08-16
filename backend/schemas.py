@@ -137,6 +137,11 @@ class DatasetItemRead(ORMModel):
     updated_at: datetime
 
 
+class DatasetImportRead(BaseModel):
+    dataset: DatasetRead
+    item_count: int
+
+
 class VariantCreate(BaseModel):
     name: Name
     model: LongName

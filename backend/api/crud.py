@@ -3,8 +3,18 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +28,15 @@ from backend.api.ownership import (
 )
 from backend.db.models import Dataset, DatasetItem, Project, Variant
 from backend.db.session import get_db_session
+from backend.dataset_import import (
+    MAX_DATASET_FILE_BYTES,
+    DatasetImportError,
+    default_dataset_name,
+    parse_dataset_file,
+)
 from backend.schemas import (
     DatasetCreate,
+    DatasetImportRead,
     DatasetItemCreate,
     DatasetItemRead,
     DatasetItemUpdate,
@@ -205,6 +222,65 @@ async def list_datasets(
         .limit(limit)
     )
     return list(result.all())
+
+
+@router.post(
+    "/projects/{project_id}/datasets/import",
+    response_model=DatasetImportRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["datasets"],
+)
+async def import_dataset_file(
+    project_id: uuid.UUID,
+    session: SessionDependency,
+    current_user: CurrentUserDependency,
+    file: Annotated[UploadFile, File(description="JSON, JSONL, or NDJSON dataset")],
+    name: Annotated[str | None, Form()] = None,
+    description: Annotated[str | None, Form()] = None,
+) -> DatasetImportRead:
+    await get_owned_project(session, current_user.id, project_id)
+    filename = file.filename or "dataset.jsonl"
+    content = await file.read(MAX_DATASET_FILE_BYTES + 1)
+    await file.close()
+    try:
+        parsed = parse_dataset_file(filename, content)
+        dataset_payload = DatasetCreate(
+            name=name or parsed.name or default_dataset_name(filename),
+            description=description if description is not None else parsed.description,
+        )
+    except (DatasetImportError, ValidationError) as exc:
+        detail = str(exc)
+        if isinstance(exc, ValidationError):
+            detail = exc.errors()[0]["msg"]
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=detail,
+        ) from exc
+
+    dataset = Dataset(
+        project_id=project_id,
+        name=dataset_payload.name,
+        description=dataset_payload.description,
+    )
+    dataset.items = [
+        DatasetItem(
+            external_id=item.external_id,
+            input=item.input,
+            expected_output=item.expected_output,
+            keywords=item.keywords,
+        )
+        for item in parsed.items
+    ]
+    session.add(dataset)
+    await _commit(
+        session,
+        "A dataset with this name already exists in the project",
+    )
+    await session.refresh(dataset)
+    return DatasetImportRead(
+        dataset=DatasetRead.model_validate(dataset),
+        item_count=len(parsed.items),
+    )
 
 
 @router.get("/datasets/{dataset_id}", response_model=DatasetRead, tags=["datasets"])

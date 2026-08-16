@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -124,6 +125,89 @@ def test_dataset_and_item_crud(client: TestClient) -> None:
 
     assert client.delete(f"/api/v1/dataset-items/{item['id']}").status_code == 204
     assert client.delete(f"/api/v1/datasets/{dataset['id']}").status_code == 204
+
+
+def test_import_jsonl_dataset_and_items_atomically(client: TestClient) -> None:
+    project = create_project(client)
+    content = "\n".join(
+        json.dumps(item)
+        for item in [
+            {
+                "id": "capital-france",
+                "input": "What is the capital of France?",
+                "expected_output": "Paris",
+                "keywords": ["Paris"],
+            },
+            {
+                "external_id": "addition",
+                "input": "What is 5 + 7?",
+                "expected_output": "12",
+                "keywords": ["12"],
+            },
+        ]
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/datasets/import",
+        data={"name": "Uploaded benchmark", "description": "Imported JSONL"},
+        files={"file": ("questions.jsonl", content, "application/x-ndjson")},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["item_count"] == 2
+    dataset = response.json()["dataset"]
+    assert dataset["name"] == "Uploaded benchmark"
+    items = client.get(f"/api/v1/datasets/{dataset['id']}/items")
+    assert items.status_code == 200
+    assert {item["external_id"] for item in items.json()} == {
+        "capital-france",
+        "addition",
+    }
+
+
+def test_import_json_document_metadata_and_reject_invalid_file(
+    client: TestClient,
+) -> None:
+    project = create_project(client)
+    document = {
+        "name": "JSON benchmark",
+        "description": "Metadata comes from the file",
+        "items": [
+            {
+                "id": "valid-item",
+                "input": "Return ok",
+                "expected_output": "ok",
+            }
+        ],
+    }
+    imported = client.post(
+        f"/api/v1/projects/{project['id']}/datasets/import",
+        files={
+            "file": (
+                "benchmark.json",
+                json.dumps(document),
+                "application/json",
+            )
+        },
+    )
+    assert imported.status_code == 201
+    assert imported.json()["dataset"]["name"] == "JSON benchmark"
+
+    invalid = client.post(
+        f"/api/v1/projects/{project['id']}/datasets/import",
+        data={"name": "Broken upload"},
+        files={
+            "file": (
+                "broken.jsonl",
+                '{"id":"missing-input","expected_output":"answer"}',
+                "application/x-ndjson",
+            )
+        },
+    )
+    assert invalid.status_code == 422
+    assert "input" in invalid.json()["detail"]
+    datasets = client.get(f"/api/v1/projects/{project['id']}/datasets")
+    assert [dataset["name"] for dataset in datasets.json()] == ["JSON benchmark"]
 
 
 def test_variant_crud_and_validation(client: TestClient) -> None:

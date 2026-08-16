@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "LLM Evaluation Platform"
-    app_version: str = "0.12.0"
+    app_version: str = "0.15.0"
     environment: str = "development"
     database_url: str = Field(
         default=(
@@ -55,6 +55,21 @@ class Settings(BaseSettings):
         ge=1,
         validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES",
     )
+    cors_origins: str = Field(
+        default=(
+            "http://localhost:3000,http://127.0.0.1:3000,"
+            "http://localhost:5173,http://127.0.0.1:5173"
+        ),
+        validation_alias="CORS_ORIGINS",
+    )
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.cors_origins.split(",")
+            if origin.strip()
+        ]
 
     @model_validator(mode="after")
     def require_production_auth_secret(self) -> Settings:

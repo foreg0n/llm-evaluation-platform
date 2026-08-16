@@ -1,8 +1,8 @@
 # LLM Evaluation Platform
 
-A lightweight evaluation platform for comparing real language models on
-GroqCloud. It includes an asynchronous CLI plus the foundation of a FastAPI and
-PostgreSQL backend.
+A full-stack evaluation platform for comparing real language models on
+GroqCloud. It combines an asynchronous CLI, a FastAPI and PostgreSQL backend,
+and a dark analytics frontend for everyday experiment management.
 
 ## Features
 
@@ -24,10 +24,21 @@ PostgreSQL backend.
 - Fast `202 Accepted` scheduling, progress polling, and run cancellation
 - Argon2 password hashing and expiring JWT access tokens
 - Per-user project ownership and data isolation across every protected endpoint
+- Responsive React frontend with login, registration, and session handling
+- Live overview dashboard backed by the projects and evaluation-runs APIs
+- In-app project creation and browser-safe CORS configuration
+- Project workspaces with real dataset and test-case CRUD operations
+- Editable prompts, reference answers, and comma-separated evaluation keywords
+- Atomic JSON, JSONL, and NDJSON dataset import with file-wide validation
+- In-app model-variant creation, editing, and deletion
+- Frontend evaluation launch with dataset, model, and concurrency selection
+- Live run progress, cooperative cancellation, and partial-result polling
+- Model leaderboard with quality, latency, token, cost, retry, and error data
 
 ## Requirements
 
 - Python 3.12 or newer
+- Node.js 22.13 or newer and npm
 - A GroqCloud account and API key for real evaluations
 - PostgreSQL for the backend API
 
@@ -123,15 +134,48 @@ assigning them to an inactive `legacy-import@local.invalid` account. After you
 register, a database administrator may explicitly reassign those projects to
 your new user ID; they are never exposed automatically.
 
-Start the development server:
+Start the API from the repository root:
 
 ```bash
 python -m uvicorn backend.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000/docs` for the generated OpenAPI interface. The
-`GET /health` endpoint returns a successful response only after it can execute
-`SELECT 1` against PostgreSQL.
+The API is then available at `http://127.0.0.1:8000`, with interactive docs at
+`http://127.0.0.1:8000/docs`.
+
+## Starting the Frontend
+
+Keep the backend running, then open a second terminal:
+
+Windows PowerShell:
+
+```powershell
+cd frontend
+Copy-Item .env.example .env.local
+npm install
+npm run dev
+```
+
+macOS or Linux:
+
+```bash
+cd frontend
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Open the local URL printed by the development server, normally
+`http://localhost:3000`. The frontend uses `NEXT_PUBLIC_API_URL` from
+`frontend/.env.local`; it defaults to `http://127.0.0.1:8000`.
+
+The access token is kept in `sessionStorage`, so closing the tab ends the local
+browser session. This limits persistence but does not replace production-grade
+XSS protections. A future production deployment should use HTTPS and consider
+secure, HttpOnly cookies.
+
+If the frontend runs on a different origin, add it to the comma-separated
+`CORS_ORIGINS` value in the root `.env` file and restart FastAPI.
 
 ## Authentication
 
@@ -177,6 +221,52 @@ support `offset` and `limit` query parameters; `limit` is capped at 100.
 | Datasets | `POST/GET /api/v1/projects/{project_id}/datasets` | `/api/v1/datasets/{dataset_id}` |
 | Dataset items | `POST/GET /api/v1/datasets/{dataset_id}/items` | `/api/v1/dataset-items/{item_id}` |
 | Variants | `POST/GET /api/v1/projects/{project_id}/variants` | `/api/v1/variants/{variant_id}` |
+
+### Importing a Dataset File
+
+From a project workspace, select **Import file** and upload one of:
+
+- `.jsonl` or `.ndjson`: one test-case object per non-empty line;
+- `.json`: an array of test cases, a single test case, or an object containing
+  `name`, `description`, and an `items` array.
+
+Each test case uses the same shape as the CLI dataset:
+
+```json
+{"id":"capital-france","input":"What is the capital of France?","expected_output":"Paris","keywords":["Paris"]}
+```
+
+`external_id` is also accepted instead of `id`. Files must be UTF-8, no larger
+than 5 MB, contain 1–1,000 test cases, and use unique IDs. The API validates the
+whole file before committing a single transaction, so an invalid line never
+leaves a partially imported dataset. A downloadable JSON template is available
+in the import dialog.
+
+The protected multipart endpoint is:
+
+```text
+POST /api/v1/projects/{project_id}/datasets/import
+```
+
+## Running an Evaluation from the Frontend
+
+The complete experiment workflow is available without writing API requests:
+
+1. Open a project and import or create a dataset with test cases.
+2. Open **Models** and add the Groq model variants you want to compare.
+   Evalflow includes suggestions for Qwen 3.6 27B and GPT OSS 20B, while the
+   model ID field also accepts other LiteLLM-compatible Groq model IDs.
+3. Open **Evaluation runs**, choose a dataset, select one or more models, set
+   the number of parallel workers, and select **Start evaluation**.
+4. Keep the run open to see task progress and partial results refresh every
+   1.5 seconds. You may cancel a pending or running evaluation.
+5. Inspect the model leaderboard and expand individual prompts to compare the
+   expected answer with each model output.
+
+The frontend never receives `GROQ_API_KEY`; the browser calls the authenticated
+backend, and only the backend worker communicates with GroqCloud. A provider
+failure is shown on its individual task row and does not hide successful model
+results from the same run.
 
 Create a project from PowerShell:
 
@@ -406,6 +496,18 @@ llm-evaluation-platform/
 │   ├── providers.py
 │   ├── run.py
 │   └── runner.py
+├── frontend/
+│   ├── app/
+│   │   ├── api.ts
+│   │   ├── dashboard.tsx
+│   │   ├── evaluation-workspace.tsx
+│   │   ├── globals.css
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── public/
+│   ├── tests/
+│   ├── .env.example
+│   └── package.json
 ├── artifacts/
 ├── tests/
 ├── .env.example
@@ -417,10 +519,16 @@ llm-evaluation-platform/
 
 ## Current Scope
 
-The asynchronous CLI, authenticated CRUD API, and persisted API-managed runs
-are usable today. The backend includes configuration, FastAPI, PostgreSQL
-migrations, validation, per-user ownership, selectable in-process or
-Redis/Celery execution, progress, cancellation, resumable delivery, summaries,
-and result history. Refresh tokens, password recovery, email verification, a
-frontend, production Redis security, and full observability remain future
-stages.
+The asynchronous CLI, authenticated CRUD API, persisted API-managed runs, and
+the core frontend experiment workflow are usable today. The backend includes configuration,
+FastAPI, PostgreSQL migrations, validation, per-user ownership, selectable
+in-process or Redis/Celery execution, progress, cancellation, resumable
+delivery, summaries, and result history. The frontend includes authentication,
+real overview statistics, projects, recent runs, project creation, project
+workspaces, full dataset/test-case management, atomic file import, model-variant
+management, evaluation launch, live progress and cancellation, and detailed
+result comparison.
+
+Refresh tokens, password recovery, email verification, production Redis
+security, model-catalog discovery, richer visual analytics, and full
+observability remain future stages.

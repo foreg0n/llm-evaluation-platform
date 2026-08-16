@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-evaluation-platform"
-version = "0.12.0"
-description = "A CLI and FastAPI backend for evaluating language models"
+version = "0.16.0"
+description = "A full-stack platform for evaluating language models"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
