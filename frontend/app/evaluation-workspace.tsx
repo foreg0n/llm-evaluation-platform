@@ -408,7 +408,7 @@ export function RunWorkspace({
               {detail.error && <div className="run-error">{detail.error}</div>}
               <RunAnalytics detail={detail} variants={variants} />
               <SummaryTable detail={detail} />
-              <ResultsTable results={detail.results} variants={variants} />
+              <ResultsTable key={detail.id} results={detail.results} variants={variants} />
             </>
           ) : (
             <div className="detail-empty"><span>←</span><strong>Select an evaluation run</strong><p>Open a run to inspect live progress and model-by-model results.</p></div>
@@ -552,16 +552,86 @@ function SummaryTable({ detail }: { detail: EvaluationRunDetail }) {
   );
 }
 
+type ResultStatusFilter = "all" | "successful" | "errors" | "low-quality";
+type ResultSort = "default" | "quality-asc" | "quality-desc" | "latency-asc" | "latency-desc" | "tokens-asc" | "tokens-desc";
+
+function resultQuality(result: EvaluationResult) {
+  return result.metrics
+    ? (result.metrics.exact_match + result.metrics.normalized_exact_match + result.metrics.keyword_score) / 3
+    : null;
+}
+
+function compareNullable(left: number | null, right: number | null, direction: 1 | -1) {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return (left - right) * direction;
+}
+
 function ResultsTable({ results, variants }: { results: EvaluationResult[]; variants: ModelVariant[] }) {
-  const names = new Map(variants.map((variant) => [variant.id, variant.name]));
+  const [search, setSearch] = useState("");
+  const [variantId, setVariantId] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<ResultStatusFilter>("all");
+  const [sort, setSort] = useState<ResultSort>("default");
+  const names = useMemo(() => new Map(variants.map((variant) => [variant.id, variant.name])), [variants]);
+  const resultVariants = useMemo(() => {
+    const ids = [...new Set(results.map((result) => result.variant_id))];
+    return ids.map((id) => ({ id, name: names.get(id) ?? results.find((result) => result.variant_id === id)?.model ?? id })).sort((left, right) => left.name.localeCompare(right.name));
+  }, [names, results]);
+  const visibleResults = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return results
+      .map((result, index) => ({ result, index }))
+      .filter(({ result }) => {
+        if (variantId !== "all" && result.variant_id !== variantId) return false;
+        if (query && !result.input.toLocaleLowerCase().includes(query)) return false;
+        if (statusFilter === "successful" && result.error) return false;
+        if (statusFilter === "errors" && !result.error) return false;
+        if (statusFilter === "low-quality") {
+          const quality = resultQuality(result);
+          if (quality === null || quality >= 0.67) return false;
+        }
+        return true;
+      })
+      .sort((left, right) => {
+        switch (sort) {
+          case "quality-asc": return compareNullable(resultQuality(left.result), resultQuality(right.result), 1) || left.index - right.index;
+          case "quality-desc": return compareNullable(resultQuality(left.result), resultQuality(right.result), -1) || left.index - right.index;
+          case "latency-asc": return (left.result.latency_ms - right.result.latency_ms) || left.index - right.index;
+          case "latency-desc": return (right.result.latency_ms - left.result.latency_ms) || left.index - right.index;
+          case "tokens-asc": return compareNullable(left.result.total_tokens, right.result.total_tokens, 1) || left.index - right.index;
+          case "tokens-desc": return compareNullable(left.result.total_tokens, right.result.total_tokens, -1) || left.index - right.index;
+          default: return left.index - right.index;
+        }
+      })
+      .map(({ result }) => result);
+  }, [results, search, sort, statusFilter, variantId]);
+  const hasActiveFilters = Boolean(search) || variantId !== "all" || statusFilter !== "all" || sort !== "default";
+
+  function clearFilters() {
+    setSearch("");
+    setVariantId("all");
+    setStatusFilter("all");
+    setSort("default");
+  }
+
   return (
     <section className="comparison-section results-section">
-      <div className="comparison-title"><div><span className="panel-kicker">TASK OUTPUTS</span><h3>Individual results</h3></div><small>{results.length} saved</small></div>
+      <div className="comparison-title"><div><span className="panel-kicker">TASK OUTPUTS</span><h3>Individual results</h3></div><small>{visibleResults.length} of {results.length} shown</small></div>
+      {results.length > 0 && (
+        <div className="result-controls" aria-label="Result filters">
+          <label className="result-search"><span>Search prompt</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a test case…" /></label>
+          <label><span>Model</span><select value={variantId} onChange={(event) => setVariantId(event.target.value)}><option value="all">All models</option>{resultVariants.map((variant) => <option key={variant.id} value={variant.id}>{variant.name}</option>)}</select></label>
+          <label><span>Result</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ResultStatusFilter)}><option value="all">All results</option><option value="successful">Successful</option><option value="errors">Errors only</option><option value="low-quality">Quality below 67%</option></select></label>
+          <label><span>Sort by</span><select value={sort} onChange={(event) => setSort(event.target.value as ResultSort)}><option value="default">Dataset order</option><option value="quality-asc">Quality: lowest first</option><option value="quality-desc">Quality: highest first</option><option value="latency-desc">Latency: slowest first</option><option value="latency-asc">Latency: fastest first</option><option value="tokens-desc">Tokens: highest first</option><option value="tokens-asc">Tokens: lowest first</option></select></label>
+          {hasActiveFilters && <button className="clear-filter-button" onClick={clearFilters} type="button">× Clear</button>}
+        </div>
+      )}
       <div className="table-wrap"><table className="result-table"><thead><tr><th>Model</th><th>Prompt & output</th><th>Quality</th><th>Latency</th><th>Tokens</th><th>Retries / error</th></tr></thead><tbody>
-        {results.length ? results.map((result) => {
-          const quality = result.metrics ? (result.metrics.exact_match + result.metrics.normalized_exact_match + result.metrics.keyword_score) / 3 : null;
-          return <tr key={result.id}><td><strong>{names.get(result.variant_id) ?? result.model}</strong><small>{result.model}</small></td><td><details><summary>{result.input}</summary><div className="result-copy"><span>Expected</span><p>{result.expected_output || "—"}</p><span>Model output</span><p>{result.output || "—"}</p></div></details></td><td>{quality === null ? "—" : formatPercent(quality)}</td><td>{Math.round(result.latency_ms)} ms</td><td>{result.total_tokens ?? "—"}</td><td>{result.error ? <span className="result-error" title={result.error}>Error · {result.error}</span> : `${result.retry_count} retries`}</td></tr>;
-        }) : <tr><td className="table-empty" colSpan={6}>No task results have been saved yet.</td></tr>}
+        {visibleResults.length ? visibleResults.map((result) => {
+          const quality = resultQuality(result);
+          return <tr className={result.error ? "result-row-error" : quality !== null && quality < 0.67 ? "result-row-weak" : undefined} key={result.id}><td><strong>{names.get(result.variant_id) ?? result.model}</strong><small>{result.model}</small></td><td><details><summary>{result.input}</summary><div className="result-copy"><span>Expected</span><p>{result.expected_output || "—"}</p><span>Model output</span><p>{result.output || "—"}</p></div></details></td><td>{quality === null ? "—" : formatPercent(quality)}</td><td>{Math.round(result.latency_ms)} ms</td><td>{result.total_tokens ?? "—"}</td><td>{result.error ? <span className="result-error" title={result.error}>Error · {result.error}</span> : `${result.retry_count} retries`}</td></tr>;
+        }) : results.length ? <tr><td className="table-empty filtered-empty" colSpan={6}><strong>No matching results</strong><span>Change the filters or search phrase to see more tasks.</span><button className="text-button" onClick={clearFilters} type="button">Clear filters →</button></td></tr> : <tr><td className="table-empty" colSpan={6}>No task results have been saved yet.</td></tr>}
       </tbody></table></div>
     </section>
   );

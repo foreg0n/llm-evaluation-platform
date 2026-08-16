@@ -35,6 +35,7 @@ and a dark analytics frontend for everyday experiment management.
 - Live run progress, cooperative cancellation, and partial-result polling
 - Model leaderboard with quality, latency, token, cost, retry, and error data
 - Live comparison charts for quality, latency, tokens, cost, and provider errors
+- Client-side result search, model/status filters, and metric sorting
 
 ## Requirements
 
@@ -278,6 +279,19 @@ run polling cycle, so no additional analytics endpoint or browser request is
 required. The best current value is highlighted; quality is maximized, while
 latency, token usage, cost, and errors are minimized. Models without a saved
 result are excluded from the snapshot to avoid presenting zeroes as winners.
+
+### Filtering Individual Results
+
+The individual-results table can be searched by prompt, limited to one model,
+or filtered to successful tasks, provider errors, or answers with quality below
+67%. Results can be sorted in either direction by quality, latency, or total
+tokens while dataset order remains the default. Sorting is stable, missing
+metrics stay at the end, and a single action clears every active control.
+
+Filtering and sorting happen in memory over the selected run detail. They do
+not trigger provider calls, change persisted results, or add network requests.
+Controls reset when another run is selected so that a model from the previous
+run cannot produce a misleading empty state.
 
 Create a project from PowerShell:
 
@@ -539,7 +553,9 @@ real overview statistics, projects, recent runs, project creation, project
 workspaces, full dataset/test-case management, atomic file import, model-variant
 management, evaluation launch, live progress and cancellation, detailed result
 comparison, and live charts for the five primary performance dimensions.
+Individual task results also support prompt search, model and status filters,
+weak-answer detection, and metric sorting.
 
 Refresh tokens, password recovery, email verification, production Redis
-security, model-catalog discovery, result filters, run-to-run comparison,
-exports, and full observability remain future stages.
+security, model-catalog discovery, run-to-run comparison, exports, and full
+observability remain future stages.
