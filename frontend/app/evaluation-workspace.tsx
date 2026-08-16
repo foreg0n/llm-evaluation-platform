@@ -406,6 +406,7 @@ export function RunWorkspace({
               </header>
               <div className="run-progress"><span><i style={{ width: `${progress}%` }} /></span><strong>{progress}%</strong></div>
               {detail.error && <div className="run-error">{detail.error}</div>}
+              <RunAnalytics detail={detail} variants={variants} />
               <SummaryTable detail={detail} />
               <ResultsTable results={detail.results} variants={variants} />
             </>
@@ -439,6 +440,104 @@ export function RunWorkspace({
         </Dialog>
       )}
     </>
+  );
+}
+
+type AnalyticsMetric = {
+  label: string;
+  note: string;
+  tone: "green" | "blue" | "purple" | "orange" | "red";
+  higherIsBetter: boolean;
+  value: (summary: EvaluationRunDetail["summary"][number]) => number;
+  format: (value: number) => string;
+};
+
+const analyticsMetrics: AnalyticsMetric[] = [
+  {
+    label: "Quality",
+    note: "Higher is better",
+    tone: "green",
+    higherIsBetter: true,
+    value: (summary) => summary.average_quality,
+    format: formatPercent,
+  },
+  {
+    label: "Latency",
+    note: "Lower is better",
+    tone: "blue",
+    higherIsBetter: false,
+    value: (summary) => summary.average_latency_ms,
+    format: (value) => `${Math.round(value)} ms`,
+  },
+  {
+    label: "Tokens",
+    note: "Total usage",
+    tone: "purple",
+    higherIsBetter: false,
+    value: (summary) => summary.total_tokens,
+    format: (value) => Math.round(value).toLocaleString(),
+  },
+  {
+    label: "Estimated cost",
+    note: "Lower is better",
+    tone: "orange",
+    higherIsBetter: false,
+    value: (summary) => Number(summary.total_estimated_cost),
+    format: (value) => formatCost(value),
+  },
+  {
+    label: "Errors",
+    note: "Provider failures",
+    tone: "red",
+    higherIsBetter: false,
+    value: (summary) => summary.error_count,
+    format: (value) => String(Math.round(value)),
+  },
+];
+
+function RunAnalytics({ detail, variants }: { detail: EvaluationRunDetail; variants: ModelVariant[] }) {
+  const variantNames = new Map(variants.map((variant) => [variant.id, variant.name]));
+  const completedNames = new Set(
+    detail.results.map((result) => variantNames.get(result.variant_id)).filter((name): name is string => Boolean(name)),
+  );
+  const summaries = detail.summary.filter((summary) => completedNames.has(summary.variant_name));
+
+  return (
+    <section className="analytics-section" aria-labelledby="analytics-title">
+      <div className="comparison-title analytics-title">
+        <div><span className="panel-kicker">LIVE ANALYTICS</span><h3 id="analytics-title">Performance snapshot</h3></div>
+        <small>{summaries.length ? `${summaries.length} models with results` : "Waiting for results"}</small>
+      </div>
+      {summaries.length ? (
+        <div className="analytics-grid">
+          {analyticsMetrics.map((metric) => {
+            const values = summaries.map(metric.value);
+            const maximum = Math.max(...values, 0);
+            const best = metric.higherIsBetter ? Math.max(...values) : Math.min(...values);
+            return (
+              <article className={`analytics-chart chart-${metric.tone}`} key={metric.label} role="img" aria-label={`${metric.label} comparison. ${metric.note}.`}>
+                <header><div><strong>{metric.label}</strong><small>{metric.note}</small></div><span>{metric.higherIsBetter ? "↑" : "↓"}</span></header>
+                <div className="analytics-rows">
+                  {summaries.map((summary) => {
+                    const value = metric.value(summary);
+                    const width = maximum > 0 ? Math.max(2, value / maximum * 100) : 0;
+                    const isBest = value === best;
+                    return (
+                      <div className={`analytics-row${isBest ? " best" : ""}`} key={summary.variant_name} aria-label={`${summary.variant_name}: ${metric.format(value)}${isBest ? ", best result" : ""}`}>
+                        <div><span>{summary.variant_name}</span><strong>{metric.format(value)}</strong></div>
+                        <i><b style={{ width: `${width}%` }} /></i>
+                      </div>
+                    );
+                  })}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="analytics-empty"><span /><p>Charts will appear after the first model response is saved.</p></div>
+      )}
+    </section>
   );
 }
 

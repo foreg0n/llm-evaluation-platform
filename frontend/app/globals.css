@@ -340,6 +340,35 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 .run-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #6650e6, #4ea6ff); transition: width 0.3s ease; }
 .run-progress strong { min-width: 34px; color: #a9b0c1; font-size: 9px; text-align: right; }
 .run-error { margin: 0 20px 18px; padding: 10px 12px; overflow-wrap: anywhere; border: 1px solid rgb(242 111 125 / 0.25); border-radius: 8px; color: #e98d98; background: rgb(242 111 125 / 0.07); font-size: 9px; line-height: 1.5; }
+.analytics-section { border-top: 1px solid var(--line); background: linear-gradient(180deg, rgb(128 103 255 / 0.025), transparent); }
+.analytics-title { align-items: flex-start; padding-top: 19px; }
+.analytics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0 20px 20px; }
+.analytics-chart { min-width: 0; padding: 14px; border: 1px solid #252b3d; border-radius: 10px; background: #0d1019; }
+.analytics-chart:last-child { grid-column: 1 / -1; }
+.analytics-chart header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.analytics-chart header > div { display: flex; flex-direction: column; gap: 4px; }
+.analytics-chart header strong { color: #cbd0dc; font-size: 10px; }
+.analytics-chart header small { color: #5f677a; font-size: 8px; }
+.analytics-chart header > span { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 7px; color: #79ddb9; background: rgb(66 214 164 / 0.1); font-size: 10px; }
+.analytics-rows { display: flex; flex-direction: column; gap: 11px; margin-top: 16px; }
+.analytics-row > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 5px; }
+.analytics-row span { min-width: 0; overflow: hidden; color: #777f93; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.analytics-row strong { color: #aeb5c6; font-size: 9px; }
+.analytics-row.best strong { color: #7fe0bf; }
+.analytics-row > i { display: block; height: 5px; overflow: hidden; border-radius: 999px; background: #242939; }
+.analytics-row > i b { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #37a97f, #66d9ae); transition: width 0.35s ease; }
+.chart-blue header > span { color: #83c5ff; background: rgb(78 166 255 / 0.1); }
+.chart-blue .analytics-row > i b { background: linear-gradient(90deg, #327cbd, #58b2ff); }
+.chart-purple header > span { color: #b0a2ff; background: rgb(128 103 255 / 0.12); }
+.chart-purple .analytics-row > i b { background: linear-gradient(90deg, #6b54e9, #9b8aff); }
+.chart-orange header > span { color: #efba83; background: rgb(245 166 91 / 0.1); }
+.chart-orange .analytics-row > i b { background: linear-gradient(90deg, #ba7538, #efa85f); }
+.chart-red header > span { color: #ed909a; background: rgb(242 111 125 / 0.1); }
+.chart-red .analytics-row > i b { background: linear-gradient(90deg, #a74351, #e36d7a); }
+.analytics-empty { display: flex; min-height: 120px; align-items: center; justify-content: center; gap: 10px; margin: 0 20px 20px; border: 1px dashed #282e40; border-radius: 10px; color: #656d80; font-size: 9px; }
+.analytics-empty > span { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 10px var(--blue); animation: pulse 1.4s ease-in-out infinite; }
+.analytics-empty p { margin: 0; }
+@keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
 .comparison-section { border-top: 1px solid var(--line); }
 .comparison-title { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 17px 20px 12px; }
 .comparison-title h3 { margin: 5px 0 0; font-size: 14px; }
@@ -426,6 +455,8 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
   .run-workspace { grid-template-columns: 1fr; }
   .run-list-panel, .run-detail-panel { min-height: auto; }
   .run-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .analytics-grid { grid-template-columns: 1fr; }
+  .analytics-chart:last-child { grid-column: auto; }
   .section-intro { align-items: flex-start; flex-direction: column; }
   .three-fields { grid-template-columns: 1fr; }
 }

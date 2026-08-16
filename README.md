@@ -34,6 +34,7 @@ and a dark analytics frontend for everyday experiment management.
 - Frontend evaluation launch with dataset, model, and concurrency selection
 - Live run progress, cooperative cancellation, and partial-result polling
 - Model leaderboard with quality, latency, token, cost, retry, and error data
+- Live comparison charts for quality, latency, tokens, cost, and provider errors
 
 ## Requirements
 
@@ -267,6 +268,16 @@ The frontend never receives `GROQ_API_KEY`; the browser calls the authenticated
 backend, and only the backend worker communicates with GroqCloud. A provider
 failure is shown on its individual task row and does not hide successful model
 results from the same run.
+
+### Live Run Analytics
+
+As soon as the first result is persisted, the selected run displays five
+model-comparison charts: average quality, average latency, total token usage,
+estimated cost, and provider errors. Charts update with the existing 1.5-second
+run polling cycle, so no additional analytics endpoint or browser request is
+required. The best current value is highlighted; quality is maximized, while
+latency, token usage, cost, and errors are minimized. Models without a saved
+result are excluded from the snapshot to avoid presenting zeroes as winners.
 
 Create a project from PowerShell:
 
@@ -526,9 +537,9 @@ in-process or Redis/Celery execution, progress, cancellation, resumable
 delivery, summaries, and result history. The frontend includes authentication,
 real overview statistics, projects, recent runs, project creation, project
 workspaces, full dataset/test-case management, atomic file import, model-variant
-management, evaluation launch, live progress and cancellation, and detailed
-result comparison.
+management, evaluation launch, live progress and cancellation, detailed result
+comparison, and live charts for the five primary performance dimensions.
 
 Refresh tokens, password recovery, email verification, production Redis
-security, model-catalog discovery, richer visual analytics, and full
-observability remain future stages.
+security, model-catalog discovery, result filters, run-to-run comparison,
+exports, and full observability remain future stages.
