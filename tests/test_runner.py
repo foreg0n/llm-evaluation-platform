@@ -181,3 +181,49 @@ def test_runner_limits_concurrency() -> None:
 def test_runner_rejects_invalid_concurrency() -> None:
     with pytest.raises(ValueError, match="at least 1"):
         asyncio.run(run_evaluation([], [], concurrency=0))
+
+
+def test_runner_reports_results_as_they_complete() -> None:
+    dataset = [
+        DatasetItem(id="1", input="Question", expected_output="Answer")
+    ]
+    variants = [Variant(name="test", model="test")]
+    reported = []
+
+    async def generate(prompt: str, variant: Variant) -> str:
+        return "Answer"
+
+    async def on_result(result) -> None:
+        reported.append(result.item_id)
+
+    results = asyncio.run(
+        run_evaluation(dataset, variants, generate, on_result=on_result)
+    )
+
+    assert len(results) == 1
+    assert reported == ["1"]
+
+
+def test_runner_skips_already_persisted_pairs() -> None:
+    dataset = [
+        DatasetItem(id="1", input="First", expected_output="Answer"),
+        DatasetItem(id="2", input="Second", expected_output="Answer"),
+    ]
+    variants = [Variant(name="test", model="test")]
+    prompts = []
+
+    async def generate(prompt: str, variant: Variant) -> str:
+        prompts.append(prompt)
+        return "Answer"
+
+    results = asyncio.run(
+        run_evaluation(
+            dataset,
+            variants,
+            generate,
+            skip_pairs={("1", "test")},
+        )
+    )
+
+    assert [result.item_id for result in results] == ["2"]
+    assert prompts == ["Second"]

@@ -1,7 +1,8 @@
 # LLM Evaluation Platform
 
-A lightweight command-line framework for comparing real language models on
-GroqCloud against a reusable JSONL dataset.
+A lightweight evaluation platform for comparing real language models on
+GroqCloud. It includes an asynchronous CLI plus the foundation of a FastAPI and
+PostgreSQL backend.
 
 ## Features
 
@@ -16,11 +17,19 @@ GroqCloud against a reusable JSONL dataset.
 - Error isolation: one failed request does not stop the evaluation run
 - Rich terminal summary and a reproducible JSON report
 - Network-free tests using mocked Groq responses
+- FastAPI application with a database-aware health endpoint
+- Async SQLAlchemy models and an Alembic migration for experiment history
+- Versioned CRUD API for projects, datasets, dataset items, and model variants
+- API-managed evaluation runs persisted in PostgreSQL
+- Fast `202 Accepted` scheduling, progress polling, and run cancellation
+- Argon2 password hashing and expiring JWT access tokens
+- Per-user project ownership and data isolation across every protected endpoint
 
 ## Requirements
 
 - Python 3.12 or newer
-- A GroqCloud account and API key
+- A GroqCloud account and API key for real evaluations
+- PostgreSQL for the backend API
 
 ## Installation
 
@@ -82,6 +91,192 @@ GROQ_API_KEY=your-secret-groq-key
 The `.env` file is ignored by Git. Never commit, publish, or share your API
 key. Revoke it immediately in the GroqCloud Console if it is exposed.
 
+## Starting the Backend
+
+Create a PostgreSQL database, then set its async SQLAlchemy URL in `.env`:
+
+```dotenv
+DATABASE_URL=postgresql+asyncpg://postgres:change-me@localhost:5432/llm_evaluation
+DATABASE_ECHO=false
+AUTH_SECRET_KEY=replace-with-a-random-secret
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+```
+
+Generate a strong signing secret instead of typing one manually:
+
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Copy the printed value into `AUTH_SECRET_KEY`. JWT payloads are signed, not
+encrypted, so never put passwords, API keys, or other secrets inside them. Use
+HTTPS outside local development.
+
+Create or update the database schema:
+
+```bash
+python -m alembic upgrade head
+```
+
+Migration `20260815_0003` preserves projects created before authentication by
+assigning them to an inactive `legacy-import@local.invalid` account. After you
+register, a database administrator may explicitly reassign those projects to
+your new user ID; they are never exposed automatically.
+
+Start the development server:
+
+```bash
+python -m uvicorn backend.main:app --reload
+```
+
+Open `http://127.0.0.1:8000/docs` for the generated OpenAPI interface. The
+`GET /health` endpoint returns a successful response only after it can execute
+`SELECT 1` against PostgreSQL.
+
+## Authentication
+
+Register once, then exchange your credentials for a short-lived bearer token:
+
+```powershell
+$user = Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/auth/register `
+  -ContentType "application/json" `
+  -Body '{"email":"you@example.com","password":"choose-a-long-password"}'
+
+$login = Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/auth/login `
+  -ContentType "application/json" `
+  -Body '{"email":"you@example.com","password":"choose-a-long-password"}'
+
+$headers = @{ Authorization = "Bearer $($login.access_token)" }
+```
+
+The available auth endpoints are:
+
+- `POST /api/v1/auth/register` for JSON registration
+- `POST /api/v1/auth/login` for JSON login
+- `POST /api/v1/auth/token` for the OAuth2 password form used by Swagger UI
+- `GET /api/v1/auth/me` for the current account
+
+The health endpoint and auth endpoints are public. Every project, dataset,
+item, variant, run, and result endpoint requires `Authorization: Bearer ...`.
+Users see only their own projects and all nested resources inherit that
+ownership. Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES`; sign in again to
+obtain a new one.
+
+## CRUD API
+
+All data-management endpoints use the `/api/v1` prefix. Collection endpoints
+support `offset` and `limit` query parameters; `limit` is capped at 100.
+
+| Resource | Create and list | Read, update, and delete |
+| --- | --- | --- |
+| Projects | `POST/GET /api/v1/projects` | `/api/v1/projects/{project_id}` |
+| Datasets | `POST/GET /api/v1/projects/{project_id}/datasets` | `/api/v1/datasets/{dataset_id}` |
+| Dataset items | `POST/GET /api/v1/datasets/{dataset_id}/items` | `/api/v1/dataset-items/{item_id}` |
+| Variants | `POST/GET /api/v1/projects/{project_id}/variants` | `/api/v1/variants/{variant_id}` |
+
+Create a project from PowerShell:
+
+```powershell
+$project = Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/projects `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body '{"name":"Groq comparison","description":"Qwen vs GPT-OSS"}'
+
+$project.id
+```
+
+Successful creates return `201`, successful deletes return `204`, missing
+resources return `404`, duplicate unique values return `409`, and invalid
+request bodies return `422`.
+
+## Running an Evaluation through the API
+
+After creating a project, dataset items, and variants, start a persisted run:
+
+```powershell
+$body = @{
+  project_id = $project.id
+  dataset_id = $dataset.id
+  variant_ids = @($qwen.id, $gptOss.id)
+  concurrency = 3
+} | ConvertTo-Json
+
+$acceptedRun = Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/runs `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+The API immediately returns `202 Accepted` with a `pending` run. Read progress
+and results with:
+
+- `GET /api/v1/runs?project_id={project_id}`
+- `GET /api/v1/runs/{run_id}`
+- `GET /api/v1/runs/{run_id}/results?offset=0&limit=50`
+- `POST /api/v1/runs/{run_id}/cancel`
+
+`total_tasks` is the number of dataset-item/model pairs. `completed_tasks`
+increases after each result is safely committed, so clients can calculate
+progress as `completed_tasks / total_tasks`. Individual provider errors are
+stored in their results and do not fail the run. Unexpected orchestration or
+persistence errors mark the run as `failed`.
+
+## Redis and Celery Worker
+
+The default `TASK_BACKEND=inprocess` remains convenient for development. To run
+evaluations in a separate durable worker, start Redis:
+
+```powershell
+docker compose -f compose.redis.yaml up -d
+docker exec llm-eval-redis redis-cli ping
+```
+
+The second command should print `PONG`. The Compose service enables Redis AOF
+persistence and stores data in the `llm-eval-redis-data` volume.
+
+Switch the scheduler in `.env`:
+
+```dotenv
+TASK_BACKEND=celery
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+```
+
+Run the API and worker in separate PowerShell windows:
+
+```powershell
+python -m uvicorn backend.main:app --reload
+```
+
+```powershell
+python -m celery -A backend.worker.celery_app:celery_app `
+  worker --loglevel=INFO --pool=solo
+```
+
+`--pool=solo` is the predictable development option on Windows. The worker
+handles one evaluation run at a time, while each run still performs its model
+requests concurrently through the existing asyncio semaphore. Linux workers
+can normally use Celery's default prefork pool.
+
+Celery uses late acknowledgement, requeues work when a worker process is lost,
+and reserves one long-running task per worker slot. A redelivered task reads
+existing PostgreSQL results and evaluates only missing item/model pairs.
+Cancellation is cooperative: pending Celery messages are revoked, and a running
+worker stops after it observes the database status change.
+
+See the official [Celery configuration](https://docs.celeryq.dev/en/stable/userguide/configuration.html),
+[Celery concurrency guide](https://docs.celeryq.dev/en/main/userguide/concurrency/),
+and [Redis Docker guide](https://redis.io/tutorials/operate/orchestration/docker/)
+for production considerations.
+
 ## Running an Evaluation
 
 The default run compares these two models:
@@ -132,8 +327,10 @@ token usage, estimated cost, retry count, and provider errors for every item.
 pytest
 ```
 
-Tests inject mocked completion functions into `LiteLLMProvider`. They do not
-read your API key and never send requests to GroqCloud.
+Tests inject mocked completion functions into `LiteLLMProvider` and the run API.
+Backend integration tests use a temporary SQLite database and cover registration,
+login, expired tokens, protected routes, and cross-user isolation. They do not
+read your API key, send requests to GroqCloud, or modify PostgreSQL.
 
 ## Dataset Format
 
@@ -190,6 +387,16 @@ immediately, while the runner records the error and continues with later items.
 
 ```text
 llm-evaluation-platform/
+├── alembic/
+│   └── versions/
+├── backend/
+│   ├── api/
+│   ├── db/
+│   ├── services/
+│   ├── worker/
+│   ├── config.py
+│   ├── security.py
+│   └── main.py
 ├── evals/
 │   ├── datasets/
 │   │   └── questions.jsonl
@@ -202,6 +409,7 @@ llm-evaluation-platform/
 ├── artifacts/
 ├── tests/
 ├── .env.example
+├── compose.redis.yaml
 ├── .gitignore
 ├── pyproject.toml
 └── README.md
@@ -209,9 +417,10 @@ llm-evaluation-platform/
 
 ## Current Scope
 
-This repository contains the synchronous CLI evaluation core for comparing
-models on GroqCloud. It does not yet include a web API, persistent storage,
-background workers, distributed rate limiting, or a frontend.
-
-Possible next steps include async concurrency, FastAPI, PostgreSQL, experiment
-history, background workers, and additional evaluation metrics.
+The asynchronous CLI, authenticated CRUD API, and persisted API-managed runs
+are usable today. The backend includes configuration, FastAPI, PostgreSQL
+migrations, validation, per-user ownership, selectable in-process or
+Redis/Celery execution, progress, cancellation, resumable delivery, summaries,
+and result history. Refresh tokens, password recovery, email verification, a
+frontend, production Redis security, and full observability remain future
+stages.

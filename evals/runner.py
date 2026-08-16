@@ -16,6 +16,7 @@ GenerateFunction = Callable[
     [str, Variant],
     Awaitable[GenerationResponse | str],
 ]
+ResultCallback = Callable[[EvaluationResult], Awaitable[None]]
 
 
 async def _evaluate_one(
@@ -75,17 +76,49 @@ async def run_evaluation(
     variants: list[Variant],
     generate_function: GenerateFunction = generate,
     concurrency: int = 3,
+    on_result: ResultCallback | None = None,
+    skip_pairs: set[tuple[str, str]] | None = None,
 ) -> list[EvaluationResult]:
     if concurrency < 1:
         raise ValueError("concurrency must be at least 1")
 
     semaphore = asyncio.Semaphore(concurrency)
-    tasks = [
-        _evaluate_one(item, variant, generate_function, semaphore)
+    skipped = skip_pairs or set()
+    indexed_inputs = [
+        (item, variant)
         for item in dataset
         for variant in variants
+        if (item.id, variant.name) not in skipped
     ]
-    return list(await asyncio.gather(*tasks))
+
+    async def evaluate_indexed(
+        index: int, item: DatasetItem, variant: Variant
+    ) -> tuple[int, EvaluationResult]:
+        result = await _evaluate_one(
+            item, variant, generate_function, semaphore
+        )
+        return index, result
+
+    tasks = [
+        asyncio.create_task(evaluate_indexed(index, item, variant))
+        for index, (item, variant) in enumerate(indexed_inputs)
+    ]
+    ordered_results: list[EvaluationResult | None] = [None] * len(tasks)
+
+    try:
+        for completed_task in asyncio.as_completed(tasks):
+            index, result = await completed_task
+            ordered_results[index] = result
+            if on_result is not None:
+                await on_result(result)
+    finally:
+        unfinished = [task for task in tasks if not task.done()]
+        for task in unfinished:
+            task.cancel()
+        if unfinished:
+            await asyncio.gather(*unfinished, return_exceptions=True)
+
+    return [result for result in ordered_results if result is not None]
 
 
 def summarize_results(
