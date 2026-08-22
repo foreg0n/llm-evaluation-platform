@@ -48,6 +48,7 @@ complete workflow.
 - Model leaderboard with quality, latency, token, cost, retry, and error data
 - Live comparison charts for quality, latency, tokens, cost, and provider errors
 - Client-side result search, model/status filters, and metric sorting
+- Completed-run comparison with overall and per-model metric deltas
 
 ## Requirements
 
@@ -304,6 +305,20 @@ Filtering and sorting happen in memory over the selected run detail. They do
 not trigger provider calls, change persisted results, or add network requests.
 Controls reset when another run is selected so that a model from the previous
 run cannot produce a misleading empty state.
+
+### Comparing Completed Runs
+
+Projects with at least two completed evaluations can compare an earlier
+baseline with a later candidate. The comparison loads both persisted run
+details and calculates changes in average quality, average latency, total
+tokens, estimated cost, and provider errors. Each delta is marked as improved,
+regressed, or unchanged according to the metric direction.
+
+A model-by-model table matches variants by name and shows before/after values
+alongside each delta. Models that exist in only one run are marked as new or
+removed. The UI warns when the selected runs use different datasets or model
+sets because their overall totals are not directly comparable. Comparison is
+read-only and does not create provider calls or database records.
 
 Create a project from PowerShell:
 
@@ -566,8 +581,9 @@ workspaces, full dataset/test-case management, atomic file import, model-variant
 management, evaluation launch, live progress and cancellation, detailed result
 comparison, and live charts for the five primary performance dimensions.
 Individual task results also support prompt search, model and status filters,
-weak-answer detection, and metric sorting.
+weak-answer detection, and metric sorting. Two completed runs can be compared
+through overall and model-level quality, latency, token, cost, and error deltas.
 
 Refresh tokens, password recovery, email verification, production Redis
-security, model-catalog discovery, run-to-run comparison, exports, and full
-observability remain future stages.
+security, model-catalog discovery, exports, and full observability remain
+future stages.

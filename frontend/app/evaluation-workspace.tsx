@@ -236,6 +236,11 @@ export function ModelWorkspace({
   );
 }
 
+type RunComparisonDetails = {
+  baseline: EvaluationRunDetail;
+  candidate: EvaluationRunDetail;
+};
+
 export function RunWorkspace({
   token,
   project,
@@ -263,10 +268,21 @@ export function RunWorkspace({
   const [variantIds, setVariantIds] = useState<string[]>(variants.map((variant) => variant.id));
   const [concurrency, setConcurrency] = useState("3");
   const [saving, setSaving] = useState(false);
+  const [showCompare, setShowCompare] = useState(false);
+  const [baselineRunId, setBaselineRunId] = useState("");
+  const [candidateRunId, setCandidateRunId] = useState("");
+  const [comparison, setComparison] = useState<RunComparisonDetails | null>(null);
+  const [loadingComparison, setLoadingComparison] = useState(false);
 
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? null,
     [runs, selectedRunId],
+  );
+  const completedRuns = useMemo(
+    () => runs
+      .filter((run) => run.status === "completed")
+      .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
+    [runs],
   );
 
   const loadDetail = useCallback(async (runId: string, quiet = false) => {
@@ -301,6 +317,34 @@ export function RunWorkspace({
     setVariantIds(variants.map((variant) => variant.id));
     setConcurrency("3");
     setShowCreate(true);
+  }
+
+  function openRunComparison() {
+    const candidate = completedRuns.find((run) => run.id === selectedRunId) ?? completedRuns[0];
+    const baseline = completedRuns.find((run) => run.id !== candidate?.id);
+    if (!candidate || !baseline) return;
+    setCandidateRunId(candidate.id);
+    setBaselineRunId(baseline.id);
+    setShowCompare(true);
+  }
+
+  async function compareRuns(event: FormEvent) {
+    event.preventDefault();
+    if (!baselineRunId || !candidateRunId || baselineRunId === candidateRunId) return;
+    setLoadingComparison(true);
+    try {
+      const [baseline, candidate] = await Promise.all([
+        apiRequest<EvaluationRunDetail>(`/api/v1/runs/${baselineRunId}`, {}, token),
+        apiRequest<EvaluationRunDetail>(`/api/v1/runs/${candidateRunId}`, {}, token),
+      ]);
+      setComparison({ baseline, candidate });
+      setShowCompare(false);
+      onNotice("Run comparison loaded.");
+    } catch (caught) {
+      onFailure(caught, "Could not compare evaluation runs.");
+    } finally {
+      setLoadingComparison(false);
+    }
   }
 
   function toggleVariant(variantId: string) {
@@ -371,11 +415,15 @@ export function RunWorkspace({
           <h2>Evaluation runs</h2>
           <p>Run every test case against selected models and compare quality, speed, tokens, and errors.</p>
         </div>
-        <button className="primary-button" disabled={!canCreate} onClick={openCreateRun} type="button">↗ New evaluation</button>
+        <div className="section-actions">
+          <button className="secondary-button" disabled={completedRuns.length < 2} onClick={openRunComparison} title={completedRuns.length < 2 ? "Complete at least two runs to compare them" : undefined} type="button">⇄ Compare runs</button>
+          <button className="primary-button" disabled={!canCreate} onClick={openCreateRun} type="button">↗ New evaluation</button>
+        </div>
       </section>
       {!canCreate && (
         <div className="workflow-warning">Create at least one dataset with test cases and one model variant before starting a run.</div>
       )}
+      {comparison && <RunComparisonPanel baseline={comparison.baseline} candidate={comparison.candidate} datasets={datasets} onClose={() => setComparison(null)} />}
 
       <section className="run-workspace">
         <aside className="panel run-list-panel">
@@ -439,8 +487,145 @@ export function RunWorkspace({
           </form>
         </Dialog>
       )}
+      {showCompare && (
+        <Dialog titleId="compare-runs-title" onClose={() => setShowCompare(false)} wide>
+          <span className="panel-kicker">RUN-TO-RUN ANALYTICS</span>
+          <h2 id="compare-runs-title">Compare completed runs</h2>
+          <p>Use an earlier run as the baseline, then measure how the candidate changed across every primary metric.</p>
+          <form onSubmit={compareRuns}>
+            <div className="form-grid">
+              <label>Baseline <small>before</small><select required value={baselineRunId} onChange={(event) => setBaselineRunId(event.target.value)}>{completedRuns.map((run) => <option key={run.id} value={run.id}>run_{shortId(run.id)} · {formatDate(run.created_at)}</option>)}</select></label>
+              <label>Candidate <small>after</small><select required value={candidateRunId} onChange={(event) => setCandidateRunId(event.target.value)}>{completedRuns.map((run) => <option key={run.id} value={run.id}>run_{shortId(run.id)} · {formatDate(run.created_at)}</option>)}</select></label>
+            </div>
+            {baselineRunId === candidateRunId && <div className="comparison-form-warning">Choose two different completed runs.</div>}
+            <DialogActions disabled={!baselineRunId || !candidateRunId || baselineRunId === candidateRunId} label="Compare runs" onCancel={() => setShowCompare(false)} saving={loadingComparison} />
+          </form>
+        </Dialog>
+      )}
     </>
   );
+}
+
+type ComparisonValues = {
+  quality: number;
+  latency: number;
+  tokens: number;
+  cost: number;
+  errors: number;
+};
+
+type RunComparisonMetric = {
+  key: keyof ComparisonValues;
+  label: string;
+  higherIsBetter: boolean;
+  format: (value: number) => string;
+  formatDelta: (value: number) => string;
+};
+
+const signed = (value: number, suffix = "") => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(Math.round(value)).toLocaleString()}${suffix}`;
+const signedCost = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" : ""}$${Math.abs(value).toFixed(6)}`;
+
+const runComparisonMetrics: RunComparisonMetric[] = [
+  { key: "quality", label: "Quality", higherIsBetter: true, format: formatPercent, formatDelta: (value) => `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value * 100).toFixed(1)} pp` },
+  { key: "latency", label: "Latency", higherIsBetter: false, format: (value) => `${Math.round(value)} ms`, formatDelta: (value) => signed(value, " ms") },
+  { key: "tokens", label: "Tokens", higherIsBetter: false, format: (value) => Math.round(value).toLocaleString(), formatDelta: signed },
+  { key: "cost", label: "Cost", higherIsBetter: false, format: (value) => formatCost(value), formatDelta: signedCost },
+  { key: "errors", label: "Errors", higherIsBetter: false, format: (value) => String(Math.round(value)), formatDelta: signed },
+];
+
+function average(values: number[]) {
+  return values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+}
+
+function valuesFromRun(run: EvaluationRunDetail): ComparisonValues {
+  return {
+    quality: average(run.summary.map((summary) => summary.average_quality)),
+    latency: average(run.summary.map((summary) => summary.average_latency_ms)),
+    tokens: run.summary.reduce((total, summary) => total + summary.total_tokens, 0),
+    cost: run.summary.reduce((total, summary) => total + Number(summary.total_estimated_cost), 0),
+    errors: run.summary.reduce((total, summary) => total + summary.error_count, 0),
+  };
+}
+
+function valuesFromSummary(summary: EvaluationRunDetail["summary"][number]): ComparisonValues {
+  return {
+    quality: summary.average_quality,
+    latency: summary.average_latency_ms,
+    tokens: summary.total_tokens,
+    cost: Number(summary.total_estimated_cost),
+    errors: summary.error_count,
+  };
+}
+
+function deltaTone(metric: RunComparisonMetric, delta: number) {
+  if (Math.abs(delta) < 0.0000001) return "neutral";
+  return (metric.higherIsBetter ? delta > 0 : delta < 0) ? "improved" : "regressed";
+}
+
+function deltaMarker(tone: ReturnType<typeof deltaTone>) {
+  return tone === "improved" ? "✓" : tone === "regressed" ? "!" : "=";
+}
+
+function RunComparisonPanel({ baseline, candidate, datasets, onClose }: { baseline: EvaluationRunDetail; candidate: EvaluationRunDetail; datasets: Dataset[]; onClose: () => void }) {
+  const baselineValues = valuesFromRun(baseline);
+  const candidateValues = valuesFromRun(candidate);
+  const baselineSummaries = new Map(baseline.summary.map((summary) => [summary.variant_name, summary]));
+  const candidateSummaries = new Map(candidate.summary.map((summary) => [summary.variant_name, summary]));
+  const variantNames = [...new Set([...baselineSummaries.keys(), ...candidateSummaries.keys()])].sort();
+  const sameVariantSet = baselineSummaries.size === candidateSummaries.size && [...baselineSummaries.keys()].every((name) => candidateSummaries.has(name));
+  const baselineDataset = datasets.find((dataset) => dataset.id === baseline.dataset_id)?.name ?? `Dataset ${shortId(baseline.dataset_id)}`;
+  const candidateDataset = datasets.find((dataset) => dataset.id === candidate.dataset_id)?.name ?? `Dataset ${shortId(candidate.dataset_id)}`;
+
+  return (
+    <section className="panel run-comparison-panel" aria-labelledby="run-comparison-title">
+      <header className="run-comparison-head">
+        <div><span className="panel-kicker">RUN-TO-RUN COMPARISON</span><h2 id="run-comparison-title">What changed?</h2><p>Candidate values are compared against the selected baseline.</p></div>
+        <button className="comparison-close" onClick={onClose} type="button" aria-label="Close run comparison">×</button>
+      </header>
+      <div className="comparison-route" aria-label="Compared evaluation runs">
+        <div><small>BASELINE</small><strong>run_{shortId(baseline.id)}</strong><span>{baselineDataset} · {formatDate(baseline.created_at)}</span></div>
+        <i>→</i>
+        <div><small>CANDIDATE</small><strong>run_{shortId(candidate.id)}</strong><span>{candidateDataset} · {formatDate(candidate.created_at)}</span></div>
+      </div>
+      {baseline.dataset_id !== candidate.dataset_id && <div className="comparison-dataset-warning">⚠ These runs use different datasets. Metric changes may reflect different test cases, not only model or prompt improvements.</div>}
+      {!sameVariantSet && <div className="comparison-dataset-warning">⚠ These runs use different model sets. Overall token, cost, and error totals are not directly comparable; use the model-by-model table below.</div>}
+      <div className="comparison-metric-grid">
+        {runComparisonMetrics.map((metric) => {
+          const baselineValue = baselineValues[metric.key];
+          const candidateValue = candidateValues[metric.key];
+          const delta = candidateValue - baselineValue;
+          const tone = deltaTone(metric, delta);
+          return (
+            <article className="comparison-metric-card" key={metric.key}>
+              <div><span>{metric.label}</span><strong aria-label={`${tone}: ${metric.formatDelta(delta)}`} className={`delta-badge delta-${tone}`}>{deltaMarker(tone)} {metric.formatDelta(delta)}</strong></div>
+              <dl><div><dt>Before</dt><dd>{metric.format(baselineValue)}</dd></div><i>→</i><div><dt>After</dt><dd>{metric.format(candidateValue)}</dd></div></dl>
+            </article>
+          );
+        })}
+      </div>
+      <section className="comparison-models">
+        <div className="comparison-title"><div><span className="panel-kicker">VARIANT DELTAS</span><h3>Model-by-model changes</h3></div><small>{variantNames.length} variants</small></div>
+        <div className="table-wrap"><table className="run-comparison-table"><thead><tr><th>Variant</th>{runComparisonMetrics.map((metric) => <th key={metric.key}>{metric.label}</th>)}</tr></thead><tbody>
+          {variantNames.map((variantName) => {
+            const baselineSummary = baselineSummaries.get(variantName);
+            const candidateSummary = candidateSummaries.get(variantName);
+            const before = baselineSummary ? valuesFromSummary(baselineSummary) : null;
+            const after = candidateSummary ? valuesFromSummary(candidateSummary) : null;
+            return <tr key={variantName}><td><strong>{variantName}</strong><small>{before && after ? "Compared in both runs" : before ? "Removed from candidate" : "New in candidate"}</small></td>{runComparisonMetrics.map((metric) => <ComparisonDeltaCell after={after} before={before} key={metric.key} metric={metric} />)}</tr>;
+          })}
+        </tbody></table></div>
+      </section>
+    </section>
+  );
+}
+
+function ComparisonDeltaCell({ before, after, metric }: { before: ComparisonValues | null; after: ComparisonValues | null; metric: RunComparisonMetric }) {
+  if (!before || !after) return <td><span className="comparison-unavailable">{after ? "New" : "Removed"}</span></td>;
+  const beforeValue = before[metric.key];
+  const afterValue = after[metric.key];
+  const delta = afterValue - beforeValue;
+  const tone = deltaTone(metric, delta);
+  return <td><strong aria-label={`${tone}: ${metric.formatDelta(delta)}`} className={`delta-badge delta-${tone}`}>{deltaMarker(tone)} {metric.formatDelta(delta)}</strong><small>{metric.format(beforeValue)} → {metric.format(afterValue)}</small></td>;
 }
 
 type AnalyticsMetric = {
