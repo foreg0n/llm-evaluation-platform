@@ -47,7 +47,7 @@ def test_tracer_provider_exports_resource_metadata_without_network() -> None:
     assert len(exporter.spans) == 1
     resource = exporter.spans[0].resource.attributes
     assert resource["service.name"] == "test-worker"
-    assert resource["service.version"] == "0.25.0"
+    assert resource["service.version"] == "0.26.0"
     assert resource["deployment.environment.name"] == "test"
     provider.shutdown()
 

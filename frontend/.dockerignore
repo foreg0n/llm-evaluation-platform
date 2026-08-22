@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.next
+.vinext
+.wrangler
+dist
+node_modules
+outputs
+work
+*.tsbuildinfo
+npm-debug.log*

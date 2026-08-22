@@ -106,7 +106,7 @@ def test_sentry_configuration_disables_pii_bodies_and_tracing(monkeypatch) -> No
     assert enabled is True
     assert init_options["dsn"] == "https://public@example.invalid/1"
     assert init_options["environment"] == "staging"
-    assert init_options["release"] == "llm-evaluation-platform@0.25.0"
+    assert init_options["release"] == "llm-evaluation-platform@0.26.0"
     assert init_options["sample_rate"] == 0.25
     assert init_options["traces_sample_rate"] == 0.0
     assert init_options["profiles_sample_rate"] == 0.0

@@ -1,0 +1,178 @@
+name: evalflow
+
+x-backend-environment: &backend-environment
+  ENVIRONMENT: ${CONTAINER_ENVIRONMENT:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_FORMAT: ${LOG_FORMAT:-json}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-llm_evaluation}
+  DATABASE_ECHO: ${DATABASE_ECHO:-false}
+  TASK_BACKEND: celery
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  READINESS_TIMEOUT_SECONDS: ${READINESS_TIMEOUT_SECONDS:-1}
+  CELERY_METRICS_ENABLED: "true"
+  CELERY_METRICS_HOST: 0.0.0.0
+  CELERY_METRICS_PORT: 9808
+  AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?Set AUTH_SECRET_KEY in .env}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  TRACING_ENABLED: ${TRACING_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${CONTAINER_OTEL_ENDPOINT:-http://host.docker.internal:4318/v1/traces}
+  OTEL_EXPORT_TIMEOUT_SECONDS: ${OTEL_EXPORT_TIMEOUT_SECONDS:-5}
+  OTEL_TRACE_SAMPLE_RATIO: ${OTEL_TRACE_SAMPLE_RATIO:-1.0}
+  SENTRY_ENABLED: ${SENTRY_ENABLED:-false}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_ERROR_SAMPLE_RATE: ${SENTRY_ERROR_SAMPLE_RATE:-1.0}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-llm_evaluation}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  redis:
+    image: redis:8.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment: *backend-environment
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment: *backend-environment
+    command:
+      - python
+      - -m
+      - uvicorn
+      - backend.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 30s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment: *backend-environment
+    command:
+      - celery
+      - -A
+      - backend.worker.celery_app:celery_app
+      - worker
+      - --loglevel=${CELERY_WORKER_LOG_LEVEL:-INFO}
+      - --pool=solo
+    ports:
+      - "127.0.0.1:${CELERY_METRICS_PORT:-9808}:9808"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:9808/metrics', timeout=2)
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    stop_grace_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 20s
+
+volumes:
+  postgres_data:
+  redis_data:

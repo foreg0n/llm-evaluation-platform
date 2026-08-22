@@ -59,6 +59,7 @@ complete workflow.
 - Optional OpenTelemetry tracing across FastAPI and Celery through W3C context
 - Local Grafana Tempo storage and a provisioned trace-exploration datasource
 - Optional privacy-safe Sentry error reporting for FastAPI and Celery failures
+- Production-oriented Docker images and one-command full-stack Compose startup
 
 ## Requirements
 
@@ -66,6 +67,7 @@ complete workflow.
 - Node.js 22.13 or newer and npm
 - A GroqCloud account and API key for real evaluations
 - PostgreSQL for the backend API
+- Docker Engine with Docker Compose for the containerized full stack
 
 ## Installation
 
@@ -151,7 +153,7 @@ HTTPS outside local development.
 Create or update the database schema:
 
 ```bash
-python -m alembic upgrade head
+alembic upgrade head
 ```
 
 Migration `20260815_0003` preserves projects created before authentication by
@@ -167,6 +169,92 @@ python -m uvicorn backend.main:app --reload
 
 The API is then available at `http://127.0.0.1:8000`, with interactive docs at
 `http://127.0.0.1:8000/docs`.
+
+## Running the Full Stack with Docker
+
+The root `compose.yaml` builds and starts PostgreSQL, Redis, a one-shot Alembic
+migration job, FastAPI, the Celery worker, and the production frontend. Local
+Python, Node.js, PostgreSQL, and Redis installations are not required for this
+mode; only Docker and provider credentials are needed.
+
+Create `.env` if it does not exist, then set at least these values:
+
+```dotenv
+POSTGRES_PASSWORD=choose-a-long-url-safe-password
+AUTH_SECRET_KEY=replace-with-64-random-hex-characters
+GROQ_API_KEY=your-secret-groq-key
+```
+
+Generate `AUTH_SECRET_KEY` with:
+
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Do not commit `.env`. The Docker build contexts explicitly exclude `.env`,
+local virtual environments, `node_modules`, build output, test caches, and
+other development files.
+
+Make sure ports `3000`, `5432`, `6379`, `8000`, and `9808` are not already used
+by manually started processes or the smaller `compose.redis.yaml` stack. Build
+and start the complete application from the repository root:
+
+```powershell
+docker compose up -d --build
+docker compose ps -a
+```
+
+The `migrate` container waits for healthy PostgreSQL, runs
+`alembic upgrade head`, and exits successfully. The API and worker start only after that job
+completes and Redis is healthy. The frontend then waits for the API readiness
+check. Follow startup logs with:
+
+```powershell
+docker compose logs -f migrate api worker frontend
+```
+
+Open:
+
+- frontend: `http://localhost:3000`;
+- API documentation: `http://localhost:8000/docs`;
+- readiness: `http://localhost:8000/ready`;
+- API metrics: `http://localhost:8000/metrics`;
+- worker metrics: `http://localhost:9808/metrics`.
+
+All published ports bind to `127.0.0.1` by default. PostgreSQL and Redis use
+persistent named volumes. The API and worker share one non-root Python image;
+the frontend runs a minimal Vinext standalone bundle as the non-root Node user.
+
+`PUBLIC_API_URL` is embedded into the browser bundle during image build. If the
+API is exposed at a different browser-visible URL, update that value and rebuild
+the frontend image:
+
+```powershell
+docker compose build frontend
+docker compose up -d frontend
+```
+
+The optional observability stack remains separate and can run alongside the
+application:
+
+```powershell
+docker compose -f compose.observability.yaml up -d
+```
+
+To export container traces to that local Tempo instance, set
+`TRACING_ENABLED=true` and keep `CONTAINER_OTEL_ENDPOINT` pointed at
+`http://host.docker.internal:4318/v1/traces`, then recreate the API and worker.
+The default application ports should remain unchanged because the provisioned
+Prometheus targets scrape host ports `8000` and `9808`.
+
+Stop the application while preserving database and Redis data:
+
+```powershell
+docker compose down
+```
+
+Adding `-v` removes both named volumes and permanently deletes the containerized
+PostgreSQL and Redis data.
 
 ### Structured Logging and Request Correlation
 
@@ -766,6 +854,7 @@ llm-evaluation-platform/
 │   ├── security.py
 │   ├── tracing.py
 │   └── main.py
+├── Dockerfile
 ├── evals/
 │   ├── datasets/
 │   │   └── questions.jsonl
@@ -785,6 +874,8 @@ llm-evaluation-platform/
 │   │   └── page.tsx
 │   ├── public/
 │   ├── tests/
+│   ├── Dockerfile
+│   ├── .dockerignore
 │   ├── .env.example
 │   └── package.json
 ├── observability/
@@ -799,6 +890,8 @@ llm-evaluation-platform/
 ├── artifacts/
 ├── tests/
 ├── .env.example
+├── .dockerignore
+├── compose.yaml
 ├── compose.observability.yaml
 ├── compose.redis.yaml
 ├── .gitignore
@@ -832,7 +925,11 @@ task spans, enriches structured logs with trace identifiers, and exports traces
 to the local Tempo datasource in Grafana. Optional Sentry integration captures
 unhandled API, worker, and persisted-run failures with correlation tags and
 strict event scrubbing, while leaving OpenTelemetry as the only tracing layer.
+The complete application also has production-oriented, non-root Docker images
+and a dependency-ordered Compose topology with persistent PostgreSQL/Redis,
+automatic migrations, localhost-only published ports, and health-gated startup.
 
 Refresh tokens, password recovery, email verification, production Redis
 security, model-catalog discovery, large-run pagination, notification delivery,
-and automated error/alert notification delivery remain future stages.
+automated error/alert notification delivery, CI/CD, and public cloud deployment
+remain future stages.
