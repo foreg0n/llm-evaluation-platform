@@ -20,8 +20,16 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "LLM Evaluation Platform"
-    app_version: str = "0.15.0"
+    app_version: str = "0.22.0"
     environment: str = "development"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO",
+        validation_alias="LOG_LEVEL",
+    )
+    log_format: Literal["json", "text"] = Field(
+        default="json",
+        validation_alias="LOG_FORMAT",
+    )
     database_url: str = Field(
         default=(
             "postgresql+asyncpg://postgres:postgres@localhost:5432/"
@@ -44,6 +52,26 @@ class Settings(BaseSettings):
     celery_result_backend: str = Field(
         default="redis://localhost:6379/1",
         validation_alias="CELERY_RESULT_BACKEND",
+    )
+    readiness_timeout_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        le=10,
+        validation_alias="READINESS_TIMEOUT_SECONDS",
+    )
+    celery_metrics_enabled: bool = Field(
+        default=True,
+        validation_alias="CELERY_METRICS_ENABLED",
+    )
+    celery_metrics_host: str = Field(
+        default="127.0.0.1",
+        validation_alias="CELERY_METRICS_HOST",
+    )
+    celery_metrics_port: int = Field(
+        default=9808,
+        ge=1,
+        le=65535,
+        validation_alias="CELERY_METRICS_PORT",
     )
     auth_secret_key: str = Field(
         default=DEVELOPMENT_AUTH_SECRET,

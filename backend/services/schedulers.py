@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.config import get_settings
 from backend.db.session import SessionFactory
+from backend.observability import get_request_id
 from backend.services.run_execution import execute_evaluation_run
 from backend.services.task_manager import RunTaskManager, task_manager
 from evals.providers import generate
@@ -50,10 +51,12 @@ class CeleryRunScheduler:
     async def schedule(self, run_id: uuid.UUID) -> None:
         from backend.worker.tasks import execute_run_task
 
+        request_id = get_request_id()
         await asyncio.to_thread(
             execute_run_task.apply_async,
             args=[str(run_id)],
             task_id=str(run_id),
+            headers={"request_id": request_id} if request_id else {},
         )
 
     async def cancel(self, run_id: uuid.UUID) -> bool:

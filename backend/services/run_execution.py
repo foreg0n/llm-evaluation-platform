@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -14,12 +16,19 @@ from backend.db.models import (
     EvaluationRun,
     Variant as DatabaseVariant,
 )
+from backend.metrics import (
+    EVALUATION_RUNS_IN_PROGRESS,
+    observe_evaluation_run,
+)
 from evals.models import (
     DatasetItem as CoreDatasetItem,
     EvaluationResult as CoreEvaluationResult,
     Variant as CoreVariant,
 )
 from evals.runner import GenerateFunction, run_evaluation
+
+
+logger = logging.getLogger(__name__)
 
 
 class RunCancelledError(RuntimeError):
@@ -90,6 +99,8 @@ async def execute_evaluation_run(
 ) -> None:
     """Execute one persisted run outside the request-scoped DB session."""
 
+    execution_started_at = time.perf_counter()
+    metrics_active = False
     async with session_factory() as session:
         try:
             run_query = (
@@ -142,6 +153,17 @@ async def execute_evaluation_run(
             run.completed_tasks = len(existing_results)
             run.error = None
             await session.commit()
+            EVALUATION_RUNS_IN_PROGRESS.inc()
+            metrics_active = True
+            logger.info(
+                "evaluation_run_started",
+                extra={
+                    "event": "evaluation_run_started",
+                    "run_id": str(run_id),
+                    "total_tasks": run.total_tasks,
+                    "completed_tasks": run.completed_tasks,
+                },
+            )
 
             core_items = [
                 CoreDatasetItem(
@@ -185,9 +207,33 @@ async def execute_evaluation_run(
             run.finished_at = datetime.now(UTC)
             run.error = None
             await session.commit()
+            observe_evaluation_run(
+                outcome="completed",
+                duration_seconds=time.perf_counter() - execution_started_at,
+            )
+            logger.info(
+                "evaluation_run_completed",
+                extra={
+                    "event": "evaluation_run_completed",
+                    "run_id": str(run_id),
+                    "total_tasks": run.total_tasks,
+                    "completed_tasks": run.completed_tasks,
+                },
+            )
         except (asyncio.CancelledError, RunCancelledError):
             await _set_terminal_state(
                 session, run_id, "cancelled", "Cancelled by user"
+            )
+            observe_evaluation_run(
+                outcome="cancelled",
+                duration_seconds=time.perf_counter() - execution_started_at,
+            )
+            logger.info(
+                "evaluation_run_cancelled",
+                extra={
+                    "event": "evaluation_run_cancelled",
+                    "run_id": str(run_id),
+                },
             )
         except Exception as exc:
             await _set_terminal_state(
@@ -196,3 +242,17 @@ async def execute_evaluation_run(
                 "failed",
                 f"{type(exc).__name__}: {exc}",
             )
+            observe_evaluation_run(
+                outcome="failed",
+                duration_seconds=time.perf_counter() - execution_started_at,
+            )
+            logger.exception(
+                "evaluation_run_failed",
+                extra={
+                    "event": "evaluation_run_failed",
+                    "run_id": str(run_id),
+                },
+            )
+        finally:
+            if metrics_active:
+                EVALUATION_RUNS_IN_PROGRESS.dec()

@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 import uuid
 
+from celery import current_task
+
 from backend.db.session import SessionFactory, dispose_engine
+from backend.metrics import (
+    CELERY_TASKS_IN_PROGRESS,
+    observe_celery_task,
+)
+from backend.observability import reset_request_id, set_request_id
 from backend.services.run_execution import execute_evaluation_run
 from backend.worker.celery_app import celery_app
 from evals.providers import generate
+
+
+logger = logging.getLogger(__name__)
 
 
 @celery_app.task(
@@ -16,6 +28,21 @@ from evals.providers import generate
     ignore_result=True,
 )
 def execute_run_task(run_id: str) -> None:
+    headers = getattr(current_task.request, "headers", None) or {}
+    request_id = headers.get("request_id") or run_id
+    token = set_request_id(request_id)
+    task_started_at = time.perf_counter()
+    CELERY_TASKS_IN_PROGRESS.inc()
+    logger.info(
+        "celery_run_task_started",
+        extra={
+            "event": "celery_run_task_started",
+            "request_id": request_id,
+            "run_id": run_id,
+            "task_id": current_task.request.id or run_id,
+        },
+    )
+
     async def execute_and_close_pool() -> None:
         try:
             await execute_evaluation_run(
@@ -28,4 +55,37 @@ def execute_run_task(run_id: str) -> None:
             # Close pooled asyncpg connections before that loop disappears.
             await dispose_engine()
 
-    asyncio.run(execute_and_close_pool())
+    try:
+        asyncio.run(execute_and_close_pool())
+    except Exception:
+        observe_celery_task(
+            outcome="failed",
+            duration_seconds=time.perf_counter() - task_started_at,
+        )
+        logger.exception(
+            "celery_run_task_failed",
+            extra={
+                "event": "celery_run_task_failed",
+                "request_id": request_id,
+                "run_id": run_id,
+                "task_id": current_task.request.id or run_id,
+            },
+        )
+        raise
+    else:
+        observe_celery_task(
+            outcome="completed",
+            duration_seconds=time.perf_counter() - task_started_at,
+        )
+        logger.info(
+            "celery_run_task_completed",
+            extra={
+                "event": "celery_run_task_completed",
+                "request_id": request_id,
+                "run_id": run_id,
+                "task_id": current_task.request.id or run_id,
+            },
+        )
+    finally:
+        CELERY_TASKS_IN_PROGRESS.dec()
+        reset_request_id(token)

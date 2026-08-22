@@ -50,6 +50,10 @@ complete workflow.
 - Client-side result search, model/status filters, and metric sorting
 - Completed-run comparison with overall and per-model metric deltas
 - Browser-side JSON and Excel-friendly CSV exports for runs and comparisons
+- Structured JSON logs with HTTP, evaluation-run, and Celery lifecycle events
+- End-to-end request correlation through validated `X-Request-ID` values
+- Prometheus metrics for HTTP traffic, evaluation runs, readiness, and workers
+- Separate database/Redis readiness reporting through `GET /ready`
 
 ## Requirements
 
@@ -158,6 +162,84 @@ python -m uvicorn backend.main:app --reload
 
 The API is then available at `http://127.0.0.1:8000`, with interactive docs at
 `http://127.0.0.1:8000/docs`.
+
+### Structured Logging and Request Correlation
+
+The API writes one JSON object per log line by default. Every HTTP completion
+event includes the method, path, status code, duration, environment, application
+version, and `request_id`. Evaluation execution and Celery task lifecycle events
+also carry `run_id` and, when available, the originating request ID.
+
+```json
+{"level":"info","event":"http_request_completed","request_id":"2dc03f54-...","method":"GET","path":"/health","status_code":200,"duration_ms":4.281}
+```
+
+Clients may send `X-Request-ID` using letters, numbers, dots, underscores, or
+hyphens, up to 128 characters. Missing or unsafe values are replaced with a
+UUID. The selected ID is returned in the response header and exposed through
+CORS, making a frontend error report easy to match with its backend log line.
+
+Configure logging in `.env`:
+
+```dotenv
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+```
+
+Supported levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`. Set
+`LOG_FORMAT=text` for a more compact local-development view. Logs intentionally
+exclude request bodies, authorization headers, passwords, and API keys.
+
+### Prometheus Metrics and Readiness
+
+The API exposes process-local Prometheus text metrics at:
+
+```text
+GET http://127.0.0.1:8000/metrics
+```
+
+The main metric families are:
+
+- `evalflow_http_requests_total` and `evalflow_http_request_duration_seconds`;
+- `evalflow_evaluation_runs_total`, in-progress runs, and run duration;
+- `evalflow_readiness_checks_total` by component and result;
+- Celery task totals, in-progress tasks, and task duration.
+
+HTTP labels use FastAPI route templates such as `/api/v1/runs/{run_id}`, never
+raw UUID paths or query strings. This keeps Prometheus label cardinality bounded
+as the number of projects and runs grows.
+
+`GET /ready` is stricter than the existing database-aware `/health` check. It
+returns `200 ready` when PostgreSQL and the configured execution backend are
+usable. With `TASK_BACKEND=inprocess`, the queue is reported as local. With
+`TASK_BACKEND=celery`, the endpoint performs a short async Redis broker ping and
+returns `503 not_ready` when either PostgreSQL or Redis is unavailable.
+
+```json
+{"status":"ready","database":"reachable","task_backend":"celery","broker":"reachable","task_queue":"ready"}
+```
+
+The Celery worker starts its own metrics listener, independently from FastAPI:
+
+```text
+http://127.0.0.1:9808/metrics
+```
+
+Configure both checks and the worker listener in `.env`:
+
+```dotenv
+READINESS_TIMEOUT_SECONDS=1
+CELERY_METRICS_ENABLED=true
+CELERY_METRICS_HOST=127.0.0.1
+CELERY_METRICS_PORT=9808
+```
+
+The default host keeps metrics local. Bind to `0.0.0.0` only inside a protected
+container or private network. For Linux Celery prefork workers, set
+`PROMETHEUS_MULTIPROC_DIR` in the process environment before worker startup and
+start with an empty directory; the worker endpoint then aggregates child-process
+counters and uses live-sum gauges. Windows `--pool=solo` needs no multiprocess
+directory.
 
 ## Starting the Frontend
 
@@ -557,6 +639,8 @@ llm-evaluation-platform/
 │   ├── services/
 │   ├── worker/
 │   ├── config.py
+│   ├── metrics.py
+│   ├── observability.py
 │   ├── security.py
 │   └── main.py
 ├── evals/
@@ -604,8 +688,11 @@ Individual task results also support prompt search, model and status filters,
 weak-answer detection, and metric sorting. Two completed runs can be compared
 through overall and model-level quality, latency, token, cost, and error deltas.
 Selected runs and comparisons can be exported locally as JSON or CSV without
-new provider or backend requests.
+new provider or backend requests. Backend requests, evaluation executions, and
+Celery tasks emit structured lifecycle logs with correlation identifiers.
+Prometheus endpoints expose bounded API/run/worker metrics, while `/ready`
+separately reports PostgreSQL and configured queue readiness.
 
 Refresh tokens, password recovery, email verification, production Redis
-security, model-catalog discovery, large-run pagination, and full observability remain
-future stages.
+security, model-catalog discovery, large-run pagination, distributed tracing,
+dashboards/alerts, and external error monitoring remain future stages.
