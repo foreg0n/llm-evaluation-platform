@@ -321,6 +321,9 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 .run-comparison-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px; }
 .run-comparison-head h2 { margin: 6px 0 0; font-size: 18px; }
 .run-comparison-head p { margin: 6px 0 0; color: #6d7589; font-size: 9px; }
+.comparison-head-actions, .export-actions { display: flex; align-items: center; gap: 7px; }
+.export-button { height: 29px; padding: 0 9px; border: 1px solid #30364a; border-radius: 8px; color: #a99cff; background: #171a27; cursor: pointer; font-size: 8px; font-weight: 800; letter-spacing: 0.03em; }
+.export-button:hover { border-color: rgb(128 103 255 / 0.55); color: #c6bdff; background: rgb(128 103 255 / 0.1); }
 .comparison-close { display: grid; width: 29px; height: 29px; place-items: center; border: 1px solid #2b3143; border-radius: 8px; color: #7c8498; background: #171a27; cursor: pointer; }
 .comparison-route { display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr); align-items: center; gap: 10px; margin: 0 20px 14px; padding: 13px 15px; border: 1px solid #272d3f; border-radius: 10px; background: #0d1019; }
 .comparison-route > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
@@ -369,7 +372,7 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 .run-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px; }
 .run-detail-head h2 { margin: 6px 0 0; font-size: 18px; }
 .run-detail-head p { margin: 6px 0 0; color: #6e768a; font-size: 9px; }
-.run-head-actions { display: flex; align-items: center; gap: 9px; }
+.run-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 9px; }
 .run-progress { display: flex; align-items: center; gap: 10px; padding: 0 20px 19px; }
 .run-progress > span { display: block; flex: 1; height: 6px; overflow: hidden; border-radius: 999px; background: #252a3a; }
 .run-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #6650e6, #4ea6ff); transition: width 0.3s ease; }
@@ -519,6 +522,8 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
   .comparison-route > div:last-child { text-align: left; }
   .comparison-route > i { transform: rotate(90deg); }
   .comparison-metric-grid { grid-template-columns: 1fr; }
+  .run-comparison-head, .run-detail-head { flex-direction: column; }
+  .comparison-head-actions, .run-head-actions { width: 100%; justify-content: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

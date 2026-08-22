@@ -49,6 +49,7 @@ complete workflow.
 - Live comparison charts for quality, latency, tokens, cost, and provider errors
 - Client-side result search, model/status filters, and metric sorting
 - Completed-run comparison with overall and per-model metric deltas
+- Browser-side JSON and Excel-friendly CSV exports for runs and comparisons
 
 ## Requirements
 
@@ -320,6 +321,25 @@ removed. The UI warns when the selected runs use different datasets or model
 sets because their overall totals are not directly comparable. Comparison is
 read-only and does not create provider calls or database records.
 
+### Exporting Runs and Comparisons
+
+Every loaded run can be downloaded as JSON or CSV from its detail header. The
+JSON file preserves the complete persisted run, including its aggregate summary
+and individual results. The CSV file contains one row per model response with
+the prompt, reference answer, output, metrics, latency, token usage, estimated
+cost, retries, and error details.
+
+An open run-to-run comparison has its own JSON and CSV actions. Comparison JSON
+stores the baseline and candidate summaries, compatibility warnings, overall
+deltas, per-model deltas, and improved/regressed/unchanged outcomes. Comparison
+CSV uses a long format with one metric per row, which is convenient for Excel,
+BI tools, and custom analysis scripts. UTF-8 BOM support keeps non-ASCII prompts
+readable in spreadsheet applications, and potentially executable spreadsheet
+formula prefixes are neutralized.
+
+All export files are assembled from already loaded browser data. Exporting does
+not call GroqCloud, create a database record, or add a backend endpoint.
+
 Create a project from PowerShell:
 
 ```powershell
@@ -583,7 +603,9 @@ comparison, and live charts for the five primary performance dimensions.
 Individual task results also support prompt search, model and status filters,
 weak-answer detection, and metric sorting. Two completed runs can be compared
 through overall and model-level quality, latency, token, cost, and error deltas.
+Selected runs and comparisons can be exported locally as JSON or CSV without
+new provider or backend requests.
 
 Refresh tokens, password recovery, email verification, production Redis
-security, model-catalog discovery, exports, and full observability remain
+security, model-catalog discovery, large-run pagination, and full observability remain
 future stages.

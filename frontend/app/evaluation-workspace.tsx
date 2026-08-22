@@ -450,7 +450,14 @@ export function RunWorkspace({
             <>
               <header className="run-detail-head">
                 <div><span className="panel-kicker">RUN_{shortId(detail.id).toUpperCase()}</span><h2>Model comparison</h2><p>{detail.completed_tasks} of {detail.total_tasks} tasks processed · concurrency {detail.concurrency}</p></div>
-                <div className="run-head-actions"><Status status={detail.status} />{["pending", "running"].includes(detail.status) && <button className="danger-button" disabled={saving} onClick={() => void cancelRun()} type="button">Cancel run</button>}</div>
+                <div className="run-head-actions">
+                  <div className="export-actions" aria-label="Export evaluation run">
+                    <button className="export-button" onClick={() => downloadRun(detail, variants, "json")} title="Download the complete run as JSON" type="button">↓ JSON</button>
+                    <button className="export-button" onClick={() => downloadRun(detail, variants, "csv")} title="Download result rows as CSV" type="button">↓ CSV</button>
+                  </div>
+                  <Status status={detail.status} />
+                  {["pending", "running"].includes(detail.status) && <button className="danger-button" disabled={saving} onClick={() => void cancelRun()} type="button">Cancel run</button>}
+                </div>
               </header>
               <div className="run-progress"><span><i style={{ width: `${progress}%` }} /></span><strong>{progress}%</strong></div>
               {detail.error && <div className="run-error">{detail.error}</div>}
@@ -566,6 +573,146 @@ function deltaMarker(tone: ReturnType<typeof deltaTone>) {
   return tone === "improved" ? "✓" : tone === "regressed" ? "!" : "=";
 }
 
+type ExportFormat = "json" | "csv";
+type CsvValue = string | number | boolean | null | undefined;
+
+function csvCell(value: CsvValue) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  const spreadsheetSafe = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${spreadsheetSafe.replaceAll('"', '""')}"`;
+}
+
+function toCsv(rows: CsvValue[][]) {
+  return `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+}
+
+function downloadText(filename: string, content: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function comparisonOutcome(metric: RunComparisonMetric, delta: number) {
+  const tone = deltaTone(metric, delta);
+  return tone === "neutral" ? "unchanged" : tone;
+}
+
+function downloadRun(detail: EvaluationRunDetail, variants: ModelVariant[], format: ExportFormat) {
+  const filename = `evalflow-run-${shortId(detail.id)}.${format}`;
+  if (format === "json") {
+    downloadText(filename, `${JSON.stringify({
+      schema_version: "1.0",
+      export_type: "evaluation_run",
+      exported_at: new Date().toISOString(),
+      run: detail,
+    }, null, 2)}\n`, "application/json;charset=utf-8");
+    return;
+  }
+
+  const variantNames = new Map(variants.map((variant) => [variant.id, variant.name]));
+  const rows: CsvValue[][] = [[
+    "run_id", "run_status", "dataset_id", "result_id", "dataset_item_id", "variant_id", "variant_name",
+    "model", "provider", "input", "expected_output", "output", "exact_match", "normalized_exact_match",
+    "keyword_score", "quality", "latency_ms", "input_tokens", "output_tokens", "total_tokens",
+    "estimated_cost", "retry_count", "error", "created_at",
+  ]];
+  detail.results.forEach((result) => rows.push([
+    detail.id,
+    detail.status,
+    detail.dataset_id,
+    result.id,
+    result.dataset_item_id,
+    result.variant_id,
+    variantNames.get(result.variant_id) ?? result.model,
+    result.model,
+    result.provider,
+    result.input,
+    result.expected_output,
+    result.output,
+    result.metrics?.exact_match,
+    result.metrics?.normalized_exact_match,
+    result.metrics?.keyword_score,
+    resultQuality(result),
+    result.latency_ms,
+    result.input_tokens,
+    result.output_tokens,
+    result.total_tokens,
+    result.estimated_cost === null ? null : Number(result.estimated_cost),
+    result.retry_count,
+    result.error,
+    result.created_at,
+  ]));
+  downloadText(filename, toCsv(rows), "text/csv;charset=utf-8");
+}
+
+function comparisonExport(baseline: EvaluationRunDetail, candidate: EvaluationRunDetail) {
+  const baselineValues = valuesFromRun(baseline);
+  const candidateValues = valuesFromRun(candidate);
+  const baselineSummaries = new Map(baseline.summary.map((summary) => [summary.variant_name, summary]));
+  const candidateSummaries = new Map(candidate.summary.map((summary) => [summary.variant_name, summary]));
+  const variantNames = [...new Set([...baselineSummaries.keys(), ...candidateSummaries.keys()])].sort();
+  const metrics = (before: ComparisonValues, after: ComparisonValues) => Object.fromEntries(
+    runComparisonMetrics.map((metric) => {
+      const delta = after[metric.key] - before[metric.key];
+      return [metric.key, { baseline: before[metric.key], candidate: after[metric.key], delta, outcome: comparisonOutcome(metric, delta) }];
+    }),
+  ) as Record<keyof ComparisonValues, { baseline: number; candidate: number; delta: number; outcome: string }>;
+
+  return {
+    schema_version: "1.0",
+    export_type: "run_comparison",
+    exported_at: new Date().toISOString(),
+    baseline: { id: baseline.id, dataset_id: baseline.dataset_id, created_at: baseline.created_at, summary: baseline.summary },
+    candidate: { id: candidate.id, dataset_id: candidate.dataset_id, created_at: candidate.created_at, summary: candidate.summary },
+    warnings: {
+      different_datasets: baseline.dataset_id !== candidate.dataset_id,
+      different_model_sets: baselineSummaries.size !== candidateSummaries.size || [...baselineSummaries.keys()].some((name) => !candidateSummaries.has(name)),
+    },
+    overall: metrics(baselineValues, candidateValues),
+    variants: variantNames.map((variantName) => {
+      const beforeSummary = baselineSummaries.get(variantName);
+      const afterSummary = candidateSummaries.get(variantName);
+      return {
+        variant_name: variantName,
+        status: beforeSummary && afterSummary ? "compared" : beforeSummary ? "removed" : "new",
+        metrics: beforeSummary && afterSummary ? metrics(valuesFromSummary(beforeSummary), valuesFromSummary(afterSummary)) : null,
+      };
+    }),
+  };
+}
+
+function downloadRunComparison(baseline: EvaluationRunDetail, candidate: EvaluationRunDetail, format: ExportFormat) {
+  const filename = `evalflow-comparison-${shortId(baseline.id)}-vs-${shortId(candidate.id)}.${format}`;
+  if (format === "json") {
+    downloadText(filename, `${JSON.stringify(comparisonExport(baseline, candidate), null, 2)}\n`, "application/json;charset=utf-8");
+    return;
+  }
+
+  const exportData = comparisonExport(baseline, candidate);
+  const rows: CsvValue[][] = [[
+    "scope", "variant_name", "metric", "baseline_run_id", "candidate_run_id", "baseline_dataset_id",
+    "candidate_dataset_id", "baseline_value", "candidate_value", "delta", "outcome",
+  ]];
+  runComparisonMetrics.forEach((metric) => {
+    const values = exportData.overall[metric.key];
+    rows.push(["overall", null, metric.key, baseline.id, candidate.id, baseline.dataset_id, candidate.dataset_id, values.baseline, values.candidate, values.delta, values.outcome]);
+  });
+  exportData.variants.forEach((variant) => {
+    runComparisonMetrics.forEach((metric) => {
+      const values = variant.metrics?.[metric.key];
+      rows.push(["variant", variant.variant_name, metric.key, baseline.id, candidate.id, baseline.dataset_id, candidate.dataset_id, values?.baseline, values?.candidate, values?.delta, values?.outcome ?? variant.status]);
+    });
+  });
+  downloadText(filename, toCsv(rows), "text/csv;charset=utf-8");
+}
+
 function RunComparisonPanel({ baseline, candidate, datasets, onClose }: { baseline: EvaluationRunDetail; candidate: EvaluationRunDetail; datasets: Dataset[]; onClose: () => void }) {
   const baselineValues = valuesFromRun(baseline);
   const candidateValues = valuesFromRun(candidate);
@@ -580,7 +727,13 @@ function RunComparisonPanel({ baseline, candidate, datasets, onClose }: { baseli
     <section className="panel run-comparison-panel" aria-labelledby="run-comparison-title">
       <header className="run-comparison-head">
         <div><span className="panel-kicker">RUN-TO-RUN COMPARISON</span><h2 id="run-comparison-title">What changed?</h2><p>Candidate values are compared against the selected baseline.</p></div>
-        <button className="comparison-close" onClick={onClose} type="button" aria-label="Close run comparison">×</button>
+        <div className="comparison-head-actions">
+          <div className="export-actions" aria-label="Export run comparison">
+            <button className="export-button" onClick={() => downloadRunComparison(baseline, candidate, "json")} title="Download comparison as JSON" type="button">↓ JSON</button>
+            <button className="export-button" onClick={() => downloadRunComparison(baseline, candidate, "csv")} title="Download comparison as CSV" type="button">↓ CSV</button>
+          </div>
+          <button className="comparison-close" onClick={onClose} type="button" aria-label="Close run comparison">×</button>
+        </div>
       </header>
       <div className="comparison-route" aria-label="Compared evaluation runs">
         <div><small>BASELINE</small><strong>run_{shortId(baseline.id)}</strong><span>{baselineDataset} · {formatDate(baseline.created_at)}</span></div>
