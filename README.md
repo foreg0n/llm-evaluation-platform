@@ -4,6 +4,18 @@ A full-stack evaluation platform for comparing real language models on
 GroqCloud. It combines an asynchronous CLI, a FastAPI and PostgreSQL backend,
 and a dark analytics frontend for everyday experiment management.
 
+## Development Approach
+
+The backend and evaluation core were designed and implemented by the project
+author. This includes the provider architecture, asynchronous runner, metrics,
+FastAPI application, PostgreSQL persistence, authentication, Celery/Redis task
+execution, error handling, and automated tests.
+
+The frontend was developed with assistance from AI coding tools. The project
+author defined the product requirements, selected the visual direction,
+reviewed the generated code, connected it to the backend, and tested the
+complete workflow.
+
 ## Features
 
 - Real GroqCloud API calls through LiteLLM
