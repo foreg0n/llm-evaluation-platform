@@ -54,6 +54,8 @@ complete workflow.
 - End-to-end request correlation through validated `X-Request-ID` values
 - Prometheus metrics for HTTP traffic, evaluation runs, readiness, and workers
 - Separate database/Redis readiness reporting through `GET /ready`
+- Local Prometheus and Grafana stack with persistent named volumes
+- Provisioned platform dashboard and alert rules for availability and failures
 
 ## Requirements
 
@@ -240,6 +242,55 @@ container or private network. For Linux Celery prefork workers, set
 start with an empty directory; the worker endpoint then aggregates child-process
 counters and uses live-sum gauges. Windows `--pool=solo` needs no multiprocess
 directory.
+
+### Running Prometheus and Grafana
+
+The repository includes a monitoring stack whose configuration, dashboard, and
+alert rules are kept in Git. Before starting it, run FastAPI on port `8000`. For
+complete worker telemetry, also use `TASK_BACKEND=celery`, start Redis, and run
+the Celery worker with its metrics listener on port `9808`.
+
+Start Prometheus and Grafana from the repository root:
+
+```powershell
+docker compose -f compose.observability.yaml up -d
+docker compose -f compose.observability.yaml ps
+```
+
+Open these local endpoints:
+
+- Grafana: `http://localhost:3001`
+- Prometheus targets: `http://localhost:9090/targets`
+- Prometheus alert rules: `http://localhost:9090/alerts`
+
+Grafana automatically loads the `Evalflow / Platform Overview` dashboard and
+its Prometheus datasource. The initial login comes from `GRAFANA_ADMIN_USER`
+and `GRAFANA_ADMIN_PASSWORD`; change the example password in `.env` before
+sharing the machine or exposing the service. Both web ports bind only to
+localhost by default.
+
+The dashboard tracks API and worker availability, request rate, 5xx ratio, p95
+latency, run outcomes and duration, worker task outcomes, active work, and
+readiness failures. Seven Prometheus rules cover unavailable targets, failed
+dependencies, elevated HTTP errors or latency, and failed runs or Celery tasks.
+The rules evaluate in Prometheus; delivering notifications requires adding an
+Alertmanager or another notification integration.
+
+If the project uses `TASK_BACKEND=inprocess`, the worker target is intentionally
+down because no Celery metrics listener is running. Inspect container logs with:
+
+```powershell
+docker compose -f compose.observability.yaml logs -f prometheus grafana
+```
+
+Stop the containers without deleting their stored data:
+
+```powershell
+docker compose -f compose.observability.yaml down
+```
+
+Adding `-v` to the last command also deletes the Prometheus and Grafana named
+volumes, including locally retained metrics and Grafana state.
 
 ## Starting the Frontend
 
@@ -664,9 +715,17 @@ llm-evaluation-platform/
 │   ├── tests/
 │   ├── .env.example
 │   └── package.json
+├── observability/
+│   ├── grafana/
+│   │   ├── dashboards/
+│   │   └── provisioning/
+│   └── prometheus/
+│       ├── alerts.yml
+│       └── prometheus.yml
 ├── artifacts/
 ├── tests/
 ├── .env.example
+├── compose.observability.yaml
 ├── compose.redis.yaml
 ├── .gitignore
 ├── pyproject.toml
@@ -691,8 +750,10 @@ Selected runs and comparisons can be exported locally as JSON or CSV without
 new provider or backend requests. Backend requests, evaluation executions, and
 Celery tasks emit structured lifecycle logs with correlation identifiers.
 Prometheus endpoints expose bounded API/run/worker metrics, while `/ready`
-separately reports PostgreSQL and configured queue readiness.
+separately reports PostgreSQL and configured queue readiness. A reproducible
+Prometheus/Grafana Compose stack now scrapes those endpoints, provisions a
+source-controlled overview dashboard, and evaluates seven operational alerts.
 
 Refresh tokens, password recovery, email verification, production Redis
 security, model-catalog discovery, large-run pagination, distributed tracing,
-dashboards/alerts, and external error monitoring remain future stages.
+notification delivery, and external error monitoring remain future stages.

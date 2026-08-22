@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "LLM Evaluation Platform"
-    app_version: str = "0.22.0"
+    app_version: str = "0.23.0"
     environment: str = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
