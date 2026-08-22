@@ -13,7 +13,9 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from backend.config import Settings
+from backend.error_monitoring import set_error_context
 from backend.metrics import observe_http_request
+from backend.tracing import current_trace_ids
 
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -32,6 +34,9 @@ _structured_fields = (
     "completed_tasks",
     "metrics_host",
     "metrics_port",
+    "tracing_service",
+    "tracing_endpoint",
+    "error_monitoring_service",
 )
 
 
@@ -81,6 +86,10 @@ class JsonLogFormatter(logging.Formatter):
         contextual_request_id = getattr(record, "request_id", None) or get_request_id()
         if contextual_request_id:
             payload["request_id"] = contextual_request_id
+        trace_id, span_id = current_trace_ids()
+        if trace_id and span_id:
+            payload["trace_id"] = trace_id
+            payload["span_id"] = span_id
         for field in _structured_fields:
             value = getattr(record, field, None)
             if value is not None:
@@ -96,6 +105,9 @@ class ContextTextFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         if not hasattr(record, "request_id"):
             record.request_id = get_request_id() or "-"
+        trace_id, span_id = current_trace_ids()
+        record.trace_id = trace_id or "-"
+        record.span_id = span_id or "-"
         return super().format(record)
 
 
@@ -129,7 +141,8 @@ def configure_logging(settings: Settings) -> None:
         handler.setFormatter(
             ContextTextFormatter(
                 "%(asctime)s %(levelname)s %(name)s "
-                "request_id=%(request_id)s %(message)s"
+                "request_id=%(request_id)s trace_id=%(trace_id)s "
+                "span_id=%(span_id)s %(message)s"
             )
         )
     root.setLevel(level)
@@ -157,6 +170,7 @@ class RequestContextMiddleware:
         )
         scope.setdefault("state", {})["request_id"] = request_id
         token = set_request_id(request_id)
+        set_error_context(request_id=request_id)
         started_at = time.perf_counter()
         status_code = 500
 

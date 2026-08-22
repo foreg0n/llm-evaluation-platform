@@ -2,23 +2,44 @@ import logging
 import os
 
 from celery import Celery
-from celery.signals import worker_process_shutdown, worker_ready
+from celery.signals import worker_process_init, worker_process_shutdown, worker_ready
+from opentelemetry.instrumentation.celery import CeleryInstrumentor
+from opentelemetry.sdk.trace import TracerProvider
 from prometheus_client import CollectorRegistry, multiprocess, start_http_server
 
 from backend.config import get_settings
+from backend.error_monitoring import configure_error_monitoring
 from backend.metrics import METRICS_REGISTRY
 from backend.observability import configure_logging
+from backend.tracing import configure_tracing, shutdown_tracing
 
 settings = get_settings()
 configure_logging(settings)
+configure_error_monitoring(settings, service_name="llm-evaluation-worker")
 logger = logging.getLogger(__name__)
 _metrics_server: tuple[object, object] | None = None
+_tracer_provider: TracerProvider | None = None
 celery_app = Celery(
     "llm_evaluation_platform",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
     include=["backend.worker.tasks"],
 )
+
+
+@worker_process_init.connect(weak=False)
+def initialize_worker_tracing(**_kwargs: object) -> None:
+    """Initialize threaded exporters after Celery creates the worker process."""
+
+    global _tracer_provider
+    _tracer_provider = configure_tracing(
+        settings,
+        service_name="llm-evaluation-worker",
+    )
+    if _tracer_provider is not None:
+        CeleryInstrumentor().instrument(tracer_provider=_tracer_provider)
+
+
 celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     task_acks_late=True,
@@ -78,3 +99,4 @@ def start_worker_metrics_server(**_kwargs: object) -> None:
 def cleanup_worker_metrics_process(pid: int | None = None, **_kwargs: object) -> None:
     if pid is not None and os.getenv("PROMETHEUS_MULTIPROC_DIR"):
         multiprocess.mark_process_dead(pid)
+    shutdown_tracing(_tracer_provider)

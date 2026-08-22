@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "LLM Evaluation Platform"
-    app_version: str = "0.23.0"
+    app_version: str = "0.25.0"
     environment: str = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
@@ -29,6 +29,40 @@ class Settings(BaseSettings):
     log_format: Literal["json", "text"] = Field(
         default="json",
         validation_alias="LOG_FORMAT",
+    )
+    tracing_enabled: bool = Field(
+        default=False,
+        validation_alias="TRACING_ENABLED",
+    )
+    otel_exporter_otlp_endpoint: str = Field(
+        default="http://127.0.0.1:4318/v1/traces",
+        validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT",
+    )
+    otel_export_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=30,
+        validation_alias="OTEL_EXPORT_TIMEOUT_SECONDS",
+    )
+    otel_trace_sample_ratio: float = Field(
+        default=1.0,
+        ge=0,
+        le=1,
+        validation_alias="OTEL_TRACE_SAMPLE_RATIO",
+    )
+    sentry_enabled: bool = Field(
+        default=False,
+        validation_alias="SENTRY_ENABLED",
+    )
+    sentry_dsn: str | None = Field(
+        default=None,
+        validation_alias="SENTRY_DSN",
+    )
+    sentry_error_sample_rate: float = Field(
+        default=1.0,
+        ge=0,
+        le=1,
+        validation_alias="SENTRY_ERROR_SAMPLE_RATE",
     )
     database_url: str = Field(
         default=(
@@ -106,6 +140,10 @@ class Settings(BaseSettings):
             and self.auth_secret_key == DEVELOPMENT_AUTH_SECRET
         ):
             raise ValueError("AUTH_SECRET_KEY must be changed in production")
+        if self.sentry_enabled and not (
+            self.sentry_dsn and self.sentry_dsn.strip()
+        ):
+            raise ValueError("SENTRY_DSN is required when SENTRY_ENABLED=true")
         return self
 
 

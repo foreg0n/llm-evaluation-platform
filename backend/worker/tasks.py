@@ -8,6 +8,7 @@ import uuid
 from celery import current_task
 
 from backend.db.session import SessionFactory, dispose_engine
+from backend.error_monitoring import set_error_context
 from backend.metrics import (
     CELERY_TASKS_IN_PROGRESS,
     observe_celery_task,
@@ -30,7 +31,9 @@ logger = logging.getLogger(__name__)
 def execute_run_task(run_id: str) -> None:
     headers = getattr(current_task.request, "headers", None) or {}
     request_id = headers.get("request_id") or run_id
+    task_id = current_task.request.id or run_id
     token = set_request_id(request_id)
+    set_error_context(request_id=request_id, run_id=run_id, task_id=task_id)
     task_started_at = time.perf_counter()
     CELERY_TASKS_IN_PROGRESS.inc()
     logger.info(
@@ -39,7 +42,7 @@ def execute_run_task(run_id: str) -> None:
             "event": "celery_run_task_started",
             "request_id": request_id,
             "run_id": run_id,
-            "task_id": current_task.request.id or run_id,
+            "task_id": task_id,
         },
     )
 
@@ -68,7 +71,7 @@ def execute_run_task(run_id: str) -> None:
                 "event": "celery_run_task_failed",
                 "request_id": request_id,
                 "run_id": run_id,
-                "task_id": current_task.request.id or run_id,
+                "task_id": task_id,
             },
         )
         raise
@@ -83,7 +86,7 @@ def execute_run_task(run_id: str) -> None:
                 "event": "celery_run_task_completed",
                 "request_id": request_id,
                 "run_id": run_id,
-                "task_id": current_task.request.id or run_id,
+                "task_id": task_id,
             },
         )
     finally:

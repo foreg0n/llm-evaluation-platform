@@ -56,6 +56,9 @@ complete workflow.
 - Separate database/Redis readiness reporting through `GET /ready`
 - Local Prometheus and Grafana stack with persistent named volumes
 - Provisioned platform dashboard and alert rules for availability and failures
+- Optional OpenTelemetry tracing across FastAPI and Celery through W3C context
+- Local Grafana Tempo storage and a provisioned trace-exploration datasource
+- Optional privacy-safe Sentry error reporting for FastAPI and Celery failures
 
 ## Requirements
 
@@ -170,7 +173,9 @@ The API is then available at `http://127.0.0.1:8000`, with interactive docs at
 The API writes one JSON object per log line by default. Every HTTP completion
 event includes the method, path, status code, duration, environment, application
 version, and `request_id`. Evaluation execution and Celery task lifecycle events
-also carry `run_id` and, when available, the originating request ID.
+also carry `run_id` and, when available, the originating request ID. When
+OpenTelemetry tracing is enabled, logs emitted inside a span additionally carry
+lowercase hexadecimal `trace_id` and `span_id` fields.
 
 ```json
 {"level":"info","event":"http_request_completed","request_id":"2dc03f54-...","method":"GET","path":"/health","status_code":200,"duration_ms":4.281}
@@ -243,12 +248,12 @@ start with an empty directory; the worker endpoint then aggregates child-process
 counters and uses live-sum gauges. Windows `--pool=solo` needs no multiprocess
 directory.
 
-### Running Prometheus and Grafana
+### Running Prometheus, Grafana, and Tempo
 
-The repository includes a monitoring stack whose configuration, dashboard, and
-alert rules are kept in Git. Before starting it, run FastAPI on port `8000`. For
-complete worker telemetry, also use `TASK_BACKEND=celery`, start Redis, and run
-the Celery worker with its metrics listener on port `9808`.
+The repository includes a monitoring stack whose metrics, tracing, dashboard,
+and alert configuration are kept in Git. Before starting it, run FastAPI on
+port `8000`. For complete worker telemetry, also use `TASK_BACKEND=celery`,
+start Redis, and run the Celery worker with its metrics listener on port `9808`.
 
 Start Prometheus and Grafana from the repository root:
 
@@ -262,12 +267,13 @@ Open these local endpoints:
 - Grafana: `http://localhost:3001`
 - Prometheus targets: `http://localhost:9090/targets`
 - Prometheus alert rules: `http://localhost:9090/alerts`
+- Tempo API: `http://localhost:3200/ready`
 
-Grafana automatically loads the `Evalflow / Platform Overview` dashboard and
-its Prometheus datasource. The initial login comes from `GRAFANA_ADMIN_USER`
-and `GRAFANA_ADMIN_PASSWORD`; change the example password in `.env` before
-sharing the machine or exposing the service. Both web ports bind only to
-localhost by default.
+Grafana automatically loads the `Evalflow / Platform Overview` dashboard, the
+Prometheus datasource, and the `Evalflow Tempo` tracing datasource. The initial
+login comes from `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD`; change the
+example password in `.env` before sharing the machine or exposing the service.
+All published web and OTLP ports bind only to localhost by default.
 
 The dashboard tracks API and worker availability, request rate, 5xx ratio, p95
 latency, run outcomes and duration, worker task outcomes, active work, and
@@ -280,7 +286,7 @@ If the project uses `TASK_BACKEND=inprocess`, the worker target is intentionally
 down because no Celery metrics listener is running. Inspect container logs with:
 
 ```powershell
-docker compose -f compose.observability.yaml logs -f prometheus grafana
+docker compose -f compose.observability.yaml logs -f prometheus grafana tempo
 ```
 
 Stop the containers without deleting their stored data:
@@ -289,8 +295,72 @@ Stop the containers without deleting their stored data:
 docker compose -f compose.observability.yaml down
 ```
 
-Adding `-v` to the last command also deletes the Prometheus and Grafana named
-volumes, including locally retained metrics and Grafana state.
+Adding `-v` to the last command also deletes the Prometheus, Grafana, and Tempo
+named volumes, including locally retained metrics, traces, and Grafana state.
+
+### Distributed Tracing with OpenTelemetry
+
+Tracing is disabled by default, so missing Tempo infrastructure never prevents
+the API, CLI, worker, or tests from starting. To enable local trace export, put
+the following values in `.env` before starting FastAPI and the Celery worker:
+
+```dotenv
+TRACING_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces
+OTEL_EXPORT_TIMEOUT_SECONDS=5
+OTEL_TRACE_SAMPLE_RATIO=1.0
+```
+
+FastAPI creates server spans for application routes while excluding `/health`,
+`/ready`, and `/metrics`. Celery instrumentation injects the standard W3C trace
+context into the Redis message and restores it in the worker. Consequently, an
+evaluation scheduled by an HTTP request appears as one distributed trace rather
+than unrelated API and worker events.
+
+Open Grafana, select **Explore**, and choose **Evalflow Tempo**. Use **Search**
+to filter by `service.name`:
+
+- `llm-evaluation-api` for HTTP and Celery publishing spans;
+- `llm-evaluation-worker` for task execution spans.
+
+The default `1.0` sample ratio records every local trace. Use a smaller value in
+production. Tempo has no built-in authentication in this local setup, so its
+HTTP and OTLP receivers remain bound to localhost. Automatic spans do not store
+request bodies, passwords, API keys, prompts, or generated model outputs; avoid
+putting secrets in URLs or custom span attributes.
+
+### External Error Monitoring with Sentry
+
+Sentry reporting is disabled by default and the application works normally
+without a Sentry account. To enable it, create a Sentry Python project, copy its
+DSN into the local `.env` file, and restart both FastAPI and the Celery worker:
+
+```dotenv
+SENTRY_ENABLED=true
+SENTRY_DSN=https://public-key@your-sentry-host/project-id
+SENTRY_ERROR_SAMPLE_RATE=1.0
+```
+
+Never commit a real DSN to Git. `.env` is ignored, while `.env.example` contains
+only an empty placeholder. Setting `SENTRY_ENABLED=true` without a non-empty DSN
+fails configuration early instead of silently losing error reports.
+
+The FastAPI and Celery integrations capture unhandled API and worker failures.
+Failures handled inside the evaluation executor are captured explicitly because
+they are converted into a persisted `failed` run rather than re-raised. Events
+are tagged with available `request_id`, `run_id`, and `task_id` correlation IDs,
+plus the environment, release, and API/worker service name.
+
+Privacy controls are enforced in code: default PII is disabled, request bodies
+and local variables are not collected, cookies and query strings are removed,
+authentication and API-key headers are filtered, and known nested secret fields
+are replaced before an event leaves the process. Prompts, expected answers,
+generated model output, passwords, and Groq API keys are not intentionally sent.
+
+Sentry performance tracing and profiling are disabled. OpenTelemetry and Tempo
+remain the single tracing system, preventing duplicate spans and conflicting
+trace propagation. Tests force `SENTRY_ENABLED=false` and replace SDK calls with
+local fakes, so `pytest` never sends an event to a real Sentry endpoint.
 
 ## Starting the Frontend
 
@@ -690,9 +760,11 @@ llm-evaluation-platform/
 │   ├── services/
 │   ├── worker/
 │   ├── config.py
+│   ├── error_monitoring.py
 │   ├── metrics.py
 │   ├── observability.py
 │   ├── security.py
+│   ├── tracing.py
 │   └── main.py
 ├── evals/
 │   ├── datasets/
@@ -719,9 +791,11 @@ llm-evaluation-platform/
 │   ├── grafana/
 │   │   ├── dashboards/
 │   │   └── provisioning/
-│   └── prometheus/
+│   ├── prometheus/
 │       ├── alerts.yml
 │       └── prometheus.yml
+│   └── tempo/
+│       └── tempo.yml
 ├── artifacts/
 ├── tests/
 ├── .env.example
@@ -753,7 +827,12 @@ Prometheus endpoints expose bounded API/run/worker metrics, while `/ready`
 separately reports PostgreSQL and configured queue readiness. A reproducible
 Prometheus/Grafana Compose stack now scrapes those endpoints, provisions a
 source-controlled overview dashboard, and evaluates seven operational alerts.
+Optional OpenTelemetry instrumentation connects FastAPI request spans to Celery
+task spans, enriches structured logs with trace identifiers, and exports traces
+to the local Tempo datasource in Grafana. Optional Sentry integration captures
+unhandled API, worker, and persisted-run failures with correlation tags and
+strict event scrubbing, while leaving OpenTelemetry as the only tracing layer.
 
 Refresh tokens, password recovery, email verification, production Redis
-security, model-catalog discovery, large-run pagination, distributed tracing,
-notification delivery, and external error monitoring remain future stages.
+security, model-catalog discovery, large-run pagination, notification delivery,
+and automated error/alert notification delivery remain future stages.

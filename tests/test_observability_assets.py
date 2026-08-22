@@ -16,6 +16,13 @@ DATASOURCE_PATH = (
     / "datasources"
     / "prometheus.yml"
 )
+TEMPO_DATASOURCE_PATH = (
+    OBSERVABILITY
+    / "grafana"
+    / "provisioning"
+    / "datasources"
+    / "tempo.yml"
+)
 
 
 def load_yaml(path: Path) -> dict:
@@ -28,11 +35,17 @@ def test_observability_compose_uses_pinned_local_services() -> None:
 
     assert services["prometheus"]["image"] == "prom/prometheus:v3.13.1"
     assert services["grafana"]["image"] == "grafana/grafana:13.1.3"
+    assert services["tempo"]["image"] == "grafana/tempo:2.10.8"
     assert services["prometheus"]["ports"] == [
         "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     ]
     assert services["grafana"]["ports"] == [
         "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    ]
+    assert services["tempo"]["ports"] == [
+        "127.0.0.1:${TEMPO_HTTP_PORT:-3200}:3200",
+        "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317",
+        "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318",
     ]
     assert "host.docker.internal:host-gateway" in services["prometheus"][
         "extra_hosts"
@@ -99,3 +112,17 @@ def test_grafana_dashboard_matches_provisioned_datasource() -> None:
     assert expressions
     assert all("evalflow_" in expr or "up{" in expr for expr in expressions)
     assert all("/api/v1/runs/" not in expr for expr in expressions)
+
+
+def test_tempo_accepts_otlp_and_is_provisioned_in_grafana() -> None:
+    tempo = load_yaml(OBSERVABILITY / "tempo" / "tempo.yml")
+    datasource = load_yaml(TEMPO_DATASOURCE_PATH)["datasources"][0]
+    protocols = tempo["distributor"]["receivers"]["otlp"]["protocols"]
+
+    assert protocols["grpc"]["endpoint"] == "0.0.0.0:4317"
+    assert protocols["http"]["endpoint"] == "0.0.0.0:4318"
+    assert tempo["storage"]["trace"]["backend"] == "local"
+    assert tempo["usage_report"]["reporting_enabled"] is False
+    assert datasource["uid"] == "evalflow-tempo"
+    assert datasource["type"] == "tempo"
+    assert datasource["url"] == "http://tempo:3200"

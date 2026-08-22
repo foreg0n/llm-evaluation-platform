@@ -16,6 +16,7 @@ from backend.db.models import (
     EvaluationRun,
     Variant as DatabaseVariant,
 )
+from backend.error_monitoring import capture_exception, set_error_context
 from backend.metrics import (
     EVALUATION_RUNS_IN_PROGRESS,
     observe_evaluation_run,
@@ -100,6 +101,7 @@ async def execute_evaluation_run(
     """Execute one persisted run outside the request-scoped DB session."""
 
     execution_started_at = time.perf_counter()
+    set_error_context(run_id=run_id)
     metrics_active = False
     async with session_factory() as session:
         try:
@@ -236,6 +238,7 @@ async def execute_evaluation_run(
                 },
             )
         except Exception as exc:
+            capture_exception(exc, run_id=run_id)
             await _set_terminal_state(
                 session,
                 run_id,

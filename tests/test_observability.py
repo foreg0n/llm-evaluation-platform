@@ -2,6 +2,9 @@ import json
 import logging
 from types import SimpleNamespace
 
+from opentelemetry import trace
+from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
+
 from backend.observability import JsonLogFormatter
 
 
@@ -38,6 +41,35 @@ def test_json_formatter_emits_machine_readable_context() -> None:
     assert payload["status_code"] == 200
     assert payload["duration_ms"] == 12.5
     assert payload["timestamp"].endswith("+00:00")
+
+
+def test_json_formatter_adds_active_trace_context() -> None:
+    formatter = JsonLogFormatter(
+        service="test-service",
+        environment="test",
+        version="1.2.3",
+    )
+    record = logging.LogRecord(
+        name="backend.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=10,
+        msg="inside trace",
+        args=(),
+        exc_info=None,
+    )
+    span_context = SpanContext(
+        trace_id=0x1234567890ABCDEF1234567890ABCDEF,
+        span_id=0x1234567890ABCDEF,
+        is_remote=False,
+        trace_flags=TraceFlags.SAMPLED,
+    )
+
+    with trace.use_span(NonRecordingSpan(span_context)):
+        payload = json.loads(formatter.format(record))
+
+    assert payload["trace_id"] == "1234567890abcdef1234567890abcdef"
+    assert payload["span_id"] == "1234567890abcdef"
 
 
 def test_celery_worker_metrics_server_uses_dedicated_registry(monkeypatch) -> None:
