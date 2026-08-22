@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from evals.models import GenerationResponse, Variant
+from evals.models import Variant
 from evals.providers import (
     AsyncLLMProvider,
     LiteLLMProvider,

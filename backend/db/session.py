@@ -21,12 +21,6 @@ SessionFactory = async_sessionmaker(
 )
 
 
-def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Return the factory used by work that outlives an HTTP request."""
-
-    return SessionFactory
-
-
 async def get_db_session() -> AsyncIterator[AsyncSession]:
     """Provide one isolated SQLAlchemy session per request."""
 

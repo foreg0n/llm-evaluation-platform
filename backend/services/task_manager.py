@@ -50,7 +50,3 @@ class RunTaskManager:
 
 
 task_manager = RunTaskManager()
-
-
-def get_task_manager() -> RunTaskManager:
-    return task_manager

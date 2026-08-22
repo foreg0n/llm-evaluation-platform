@@ -7,13 +7,11 @@
   --canvas: #070912;
   --sidebar: #090b15;
   --surface: #10131f;
-  --surface-soft: #141827;
   --line: #202536;
   --purple: #8067ff;
   --purple-bright: #9b86ff;
   --blue: #4ea6ff;
   --green: #42d6a4;
-  --orange: #f5a65b;
   --red: #f26f7d;
 }
 
@@ -216,7 +214,6 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 .table-empty { height: 90px; color: #656d80; text-align: center; }
 .dashboard-loading { display: grid; min-height: 60vh; place-items: center; align-content: center; color: var(--muted); font-size: 11px; }
 .dashboard-loading span { width: 25px; height: 25px; border: 2px solid #252a3b; border-top-color: var(--purple); border-radius: 50%; animation: spin 0.8s linear infinite; }
-.boot-screen { display: grid; min-height: 100vh; place-items: center; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Modal */

@@ -16,7 +16,6 @@ from backend.api.ownership import (
     get_owned_run,
 )
 from backend.db.models import (
-    Dataset,
     DatasetItem,
     EvaluationResult as DatabaseEvaluationResult,
     EvaluationRun,
