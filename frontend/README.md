@@ -1,8 +1,8 @@
 # Evalflow Frontend
 
 Dark analytics interface for the LLM Evaluation Platform. It uses the existing
-FastAPI registration, JWT login, project, dataset, dataset-item, and
-evaluation-run endpoints.
+FastAPI registration, JWT login, project, dataset, dataset-item, provider
+credential, model-variant, and evaluation-run endpoints.
 
 The current UI supports project selection plus creating, editing, and deleting
 datasets and their test cases. Every test case stores an external ID, input
@@ -32,4 +32,7 @@ npm run lint
 ```
 
 JWT access tokens are stored in `sessionStorage`, so closing the browser tab
-ends the local frontend session. Model provider keys remain server-side.
+ends the local frontend session. Provider keys are submitted to the backend,
+encrypted at rest, masked in every later response, and never stored in browser
+storage. Users manage them from the **AI Providers** workspace and attach a
+credential to each model variant.

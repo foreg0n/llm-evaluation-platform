@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from pydantic import SecretStr
 
 from evals.models import Variant
 from evals.providers import (
@@ -60,6 +61,56 @@ def test_litellm_provider_maps_output_usage_cost_and_options() -> None:
         {"role": "system", "content": "Answer briefly."},
         {"role": "user", "content": "Capital of France?"},
     ]
+
+
+def test_litellm_provider_forwards_credentials_without_serializing_them() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def completion(**kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        return make_response()
+
+    provider = LiteLLMProvider(
+        completion_function=completion,
+        cost_function=lambda **kwargs: 0,
+    )
+    variant = Variant(
+        name="Claude",
+        model="anthropic/claude-test",
+        api_key=SecretStr("private-provider-key"),
+        api_base="https://provider.example/v1",
+        max_retries=0,
+    )
+
+    response = asyncio.run(provider.generate("Hello", variant))
+
+    assert response.output == "Paris"
+    assert calls[0]["api_key"] == "private-provider-key"
+    assert calls[0]["api_base"] == "https://provider.example/v1"
+    assert "api_key" not in variant.model_dump()
+    assert "private-provider-key" not in repr(variant)
+
+
+def test_provider_error_redacts_the_active_api_key() -> None:
+    async def completion(**_kwargs: object) -> SimpleNamespace:
+        raise RuntimeError("Rejected private-provider-key")
+
+    provider = LiteLLMProvider(
+        completion_function=completion,
+        cost_function=lambda **kwargs: 0,
+    )
+    variant = Variant(
+        name="Broken",
+        model="openai/test",
+        api_key=SecretStr("private-provider-key"),
+        max_retries=0,
+    )
+
+    with pytest.raises(ProviderExecutionError) as captured:
+        asyncio.run(provider.generate("Hello", variant))
+
+    assert "private-provider-key" not in str(captured.value)
+    assert "[Filtered]" in str(captured.value)
 
 
 def test_litellm_provider_retries_timeout_without_network() -> None:

@@ -69,7 +69,11 @@ def test_compose_keeps_secrets_external_and_binds_public_ports_locally() -> None
 
     assert "Set POSTGRES_PASSWORD in .env" in compose_text
     assert "Set AUTH_SECRET_KEY in .env" in compose_text
+    assert "Set CREDENTIAL_ENCRYPTION_KEY in .env" in compose_text
     assert backend_environment["GROQ_API_KEY"] == "${GROQ_API_KEY:-}"
+    assert backend_environment["CREDENTIAL_ENCRYPTION_KEY"] == (
+        "${CREDENTIAL_ENCRYPTION_KEY:?Set CREDENTIAL_ENCRYPTION_KEY in .env}"
+    )
     assert backend_environment["SENTRY_DSN"] == "${SENTRY_DSN:-}"
     assert "@postgres:5432/" in backend_environment["DATABASE_URL"]
     assert "redis://redis:6379/0" == backend_environment["CELERY_BROKER_URL"]

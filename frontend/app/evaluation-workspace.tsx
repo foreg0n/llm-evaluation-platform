@@ -16,6 +16,8 @@ import {
   type EvaluationRunDetail,
   type ModelVariant,
   type Project,
+  type ProviderCatalogEntry,
+  type ProviderCredential,
 } from "./api";
 
 const MODEL_PRESETS = [
@@ -45,6 +47,7 @@ type VariantDraft = {
   timeoutSeconds: string;
   maxRetries: string;
   systemPrompt: string;
+  credentialId: string;
 };
 
 const emptyVariantDraft: VariantDraft = {
@@ -55,12 +58,15 @@ const emptyVariantDraft: VariantDraft = {
   timeoutSeconds: "30",
   maxRetries: "2",
   systemPrompt: "",
+  credentialId: "",
 };
 
 export function ModelWorkspace({
   token,
   project,
   variants,
+  credentials,
+  providerCatalog,
   onVariantsChange,
   onFailure,
   onNotice,
@@ -68,6 +74,8 @@ export function ModelWorkspace({
   token: string;
   project: Project;
   variants: ModelVariant[];
+  credentials: ProviderCredential[];
+  providerCatalog: ProviderCatalogEntry[];
   onVariantsChange: (variants: ModelVariant[]) => void;
   onFailure: FailureHandler;
   onNotice: (message: string) => void;
@@ -79,7 +87,10 @@ export function ModelWorkspace({
 
   function openCreate() {
     setEditing(null);
-    setDraft(emptyVariantDraft);
+    setDraft({
+      ...emptyVariantDraft,
+      credentialId: credentials[0]?.id ?? "",
+    });
     setShowModal(true);
   }
 
@@ -93,6 +104,7 @@ export function ModelWorkspace({
       timeoutSeconds: String(variant.timeout_seconds),
       maxRetries: String(variant.max_retries),
       systemPrompt: variant.system_prompt ?? "",
+      credentialId: variant.credential_id ?? "",
     });
     setShowModal(true);
   }
@@ -109,6 +121,7 @@ export function ModelWorkspace({
       timeout_seconds: Number(draft.timeoutSeconds),
       max_retries: Number(draft.maxRetries),
       system_prompt: draft.systemPrompt.trim() || null,
+      credential_id: draft.credentialId || null,
     };
     try {
       const saved = await apiRequest<ModelVariant>(
@@ -171,15 +184,23 @@ export function ModelWorkspace({
 
       {variants.length ? (
         <section className="variant-grid">
-          {variants.map((variant) => (
+          {variants.map((variant) => {
+            const credential = credentials.find(
+              (entry) => entry.id === variant.credential_id,
+            );
+            const provider = providerCatalog.find(
+              (entry) => entry.slug === credential?.provider,
+            );
+            return (
             <article className="panel variant-card" key={variant.id}>
               <div className="variant-card-head">
                 <span className="model-orb">M</span>
-                <span className="provider-pill">{variant.provider}</span>
+                <span className="provider-pill">{provider?.label ?? (credential ? credential.provider : "Server key")}</span>
               </div>
               <h3>{variant.name}</h3>
               <code>{variant.model}</code>
               <dl>
+                <div><dt>Credential</dt><dd>{credential?.name ?? "Environment fallback"}</dd></div>
                 <div><dt>Temperature</dt><dd>{variant.temperature}</dd></div>
                 <div><dt>Max tokens</dt><dd>{variant.max_tokens ?? "provider default"}</dd></div>
                 <div><dt>Timeout</dt><dd>{variant.timeout_seconds}s</dd></div>
@@ -193,7 +214,8 @@ export function ModelWorkspace({
                 <button className="danger-button" disabled={saving} onClick={() => void deleteVariant(variant)} type="button">Delete</button>
               </div>
             </article>
-          ))}
+            );
+          })}
         </section>
       ) : (
         <section className="panel stage-empty">
@@ -208,7 +230,7 @@ export function ModelWorkspace({
         <Dialog titleId="variant-title" onClose={() => setShowModal(false)} wide>
           <span className="panel-kicker">MODEL VARIANT</span>
           <h2 id="variant-title">{editing ? "Edit model" : "Add a model"}</h2>
-          <p>LiteLLM sends these settings to Groq. Your API key stays in the backend environment.</p>
+          <p>LiteLLM routes the model request through the encrypted provider credential you select.</p>
           <form onSubmit={saveVariant}>
             <div className="form-grid">
               <label>
@@ -221,6 +243,17 @@ export function ModelWorkspace({
                 <datalist id="model-presets">{MODEL_PRESETS.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}</datalist>
               </label>
             </div>
+            <label>
+              Provider credential
+              <select value={draft.credentialId} onChange={(event) => setDraft((current) => ({ ...current, credentialId: event.target.value }))}>
+                <option value="">Server environment fallback</option>
+                {credentials.map((credential) => {
+                  const provider = providerCatalog.find((entry) => entry.slug === credential.provider);
+                  return <option key={credential.id} value={credential.id}>{provider?.label ?? credential.provider} · {credential.name} · {credential.key_hint}</option>;
+                })}
+              </select>
+              <small>{credentials.length ? "Only the credential ID is stored with this model." : "Add a key in AI Providers, or use the server environment key."}</small>
+            </label>
             <div className="form-grid three-fields">
               <label>Temperature<input min="0" max="2" step="0.1" required type="number" value={draft.temperature} onChange={(event) => setDraft((current) => ({ ...current, temperature: event.target.value }))} /></label>
               <label>Max tokens<input min="1" type="number" value={draft.maxTokens} onChange={(event) => setDraft((current) => ({ ...current, maxTokens: event.target.value }))} /></label>

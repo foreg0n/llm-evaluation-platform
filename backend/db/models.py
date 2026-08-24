@@ -93,6 +93,46 @@ class User(TimestampMixin, Base):
     projects: Mapped[list[Project]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
     )
+    provider_credentials: Mapped[list[ProviderCredential]] = relationship(
+        back_populates="owner", cascade="all, delete-orphan"
+    )
+
+
+class ProviderCredential(TimestampMixin, Base):
+    __tablename__ = "provider_credentials"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "provider",
+            "name",
+            name="uq_provider_credentials_user_provider_name",
+        ),
+        CheckConstraint(
+            "status IN ('untested', 'connected', 'invalid')",
+            name="valid_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(100), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    encrypted_payload: Mapped[str] = mapped_column(Text)
+    key_hint: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(20), default="untested")
+    last_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    owner: Mapped[User] = relationship(back_populates="provider_credentials")
+    variants: Mapped[list[Variant]] = relationship(
+        back_populates="credential", passive_deletes=True
+    )
 
 
 class Dataset(TimestampMixin, Base):
@@ -156,6 +196,10 @@ class Variant(TimestampMixin, Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
+    credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("provider_credentials.id", ondelete="RESTRICT"),
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(200))
     model: Mapped[str] = mapped_column(String(300))
     provider: Mapped[str] = mapped_column(String(100), default="litellm")
@@ -166,6 +210,9 @@ class Variant(TimestampMixin, Base):
     max_retries: Mapped[int] = mapped_column(Integer, default=2)
 
     project: Mapped[Project] = relationship(back_populates="variants")
+    credential: Mapped[ProviderCredential | None] = relationship(
+        back_populates="variants"
+    )
     runs: Mapped[list[EvaluationRun]] = relationship(
         secondary=evaluation_run_variants, back_populates="variants"
     )

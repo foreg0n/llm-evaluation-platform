@@ -4,12 +4,14 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, ClassVar
+from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     EmailStr,
     Field,
+    SecretStr,
     field_validator,
     model_validator,
 )
@@ -146,6 +148,7 @@ class VariantCreate(BaseModel):
     name: Name
     model: LongName
     provider: Annotated[str, Field(min_length=1, max_length=100)] = "litellm"
+    credential_id: uuid.UUID | None = None
     temperature: Annotated[float, Field(ge=0, le=2)] = 0.0
     max_tokens: Annotated[int, Field(gt=0)] | None = None
     system_prompt: str | None = None
@@ -168,6 +171,7 @@ class VariantUpdate(RejectNullFields):
     name: Name | None = None
     model: LongName | None = None
     provider: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+    credential_id: uuid.UUID | None = None
     temperature: Annotated[float, Field(ge=0, le=2)] | None = None
     max_tokens: Annotated[int, Field(gt=0)] | None = None
     system_prompt: str | None = None
@@ -181,6 +185,7 @@ class VariantRead(ORMModel):
     name: str
     model: str
     provider: str
+    credential_id: uuid.UUID | None
     temperature: float
     max_tokens: int | None
     system_prompt: str | None
@@ -188,6 +193,85 @@ class VariantRead(ORMModel):
     max_retries: int
     created_at: datetime
     updated_at: datetime
+
+
+ProviderSlug = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-z0-9][a-z0-9_-]*$",
+    ),
+]
+
+
+def validate_provider_api_base(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().rstrip("/")
+    parsed = urlsplit(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("api_base must be a complete http:// or https:// URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("api_base must not contain embedded credentials")
+    if parsed.fragment:
+        raise ValueError("api_base must not contain a URL fragment")
+    return normalized
+
+
+class ProviderCatalogEntry(BaseModel):
+    slug: str
+    label: str
+    model_prefix: str
+    api_key_placeholder: str
+    supports_custom_base_url: bool = False
+
+
+class ProviderCredentialCreate(BaseModel):
+    provider: ProviderSlug
+    name: Name
+    api_key: Annotated[SecretStr, Field(min_length=1, max_length=4096)]
+    api_base: Annotated[str, Field(max_length=2048)] | None = None
+
+    @field_validator("api_base")
+    @classmethod
+    def validate_api_base(cls, value: str | None) -> str | None:
+        return validate_provider_api_base(value)
+
+
+class ProviderCredentialUpdate(RejectNullFields):
+    reject_null_fields = frozenset({"name", "api_key"})
+
+    name: Name | None = None
+    api_key: Annotated[SecretStr, Field(min_length=1, max_length=4096)] | None = None
+    api_base: Annotated[str, Field(max_length=2048)] | None = None
+
+    @field_validator("api_base")
+    @classmethod
+    def validate_api_base(cls, value: str | None) -> str | None:
+        return validate_provider_api_base(value)
+
+
+class ProviderCredentialRead(ORMModel):
+    id: uuid.UUID
+    provider: str
+    name: str
+    key_hint: str
+    api_base: str | None
+    status: str
+    last_checked_at: datetime | None
+    last_used_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProviderCredentialTestRequest(BaseModel):
+    model: LongName
+
+
+class ProviderCredentialTestRead(BaseModel):
+    status: str
+    checked_at: datetime
 
 
 class EvaluationRunCreate(BaseModel):

@@ -10,9 +10,12 @@ import {
   type EvaluationRun,
   type ModelVariant,
   type Project,
+  type ProviderCatalogEntry,
+  type ProviderCredential,
   type User,
 } from "./api";
 import { ModelWorkspace, RunWorkspace } from "./evaluation-workspace";
+import { ProviderWorkspace } from "./provider-workspace";
 
 const shortId = (value: string) => value.slice(0, 8);
 const formatDate = (value: string) =>
@@ -56,9 +59,12 @@ export default function Dashboard({
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [variants, setVariants] = useState<ModelVariant[]>([]);
   const [items, setItems] = useState<DatasetItem[]>([]);
+  const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogEntry[]>([]);
+  const [providerCredentials, setProviderCredentials] = useState<ProviderCredential[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
   const [projectSection, setProjectSection] = useState<"datasets" | "models" | "runs">("datasets");
+  const [showProviderSettings, setShowProviderSettings] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -95,14 +101,18 @@ export default function Dashboard({
 
   async function loadWorkspace() {
     try {
-      const [account, projectList, runList] = await Promise.all([
+      const [account, projectList, runList, catalog, credentials] = await Promise.all([
         apiRequest<User>("/api/v1/auth/me", {}, token),
         apiRequest<Project[]>("/api/v1/projects", {}, token),
         apiRequest<EvaluationRun[]>("/api/v1/runs", {}, token),
+        apiRequest<ProviderCatalogEntry[]>("/api/v1/providers/catalog", {}, token),
+        apiRequest<ProviderCredential[]>("/api/v1/provider-credentials", {}, token),
       ]);
       setUser(account);
       setProjects(projectList);
       setRuns(runList);
+      setProviderCatalog(catalog);
+      setProviderCredentials(credentials);
       setError("");
     } catch (caught) {
       handleFailure(caught, "Could not load workspace.");
@@ -142,6 +152,7 @@ export default function Dashboard({
   );
 
   async function openProject(project: Project, resetSection = true) {
+    setShowProviderSettings(false);
     setSelectedProject(project);
     if (resetSection) setProjectSection("datasets");
     setSelectedDataset(null);
@@ -163,11 +174,22 @@ export default function Dashboard({
   }
 
   function showOverview() {
+    setShowProviderSettings(false);
     setSelectedProject(null);
     setSelectedDataset(null);
     setDatasets([]);
     setVariants([]);
     setItems([]);
+    setError("");
+  }
+
+  function showProviders() {
+    setSelectedProject(null);
+    setSelectedDataset(null);
+    setDatasets([]);
+    setVariants([]);
+    setItems([]);
+    setShowProviderSettings(true);
     setError("");
   }
 
@@ -422,8 +444,43 @@ export default function Dashboard({
     }
   }
 
-  const nav = ["Overview", "Projects", "Datasets", "Models", "Evaluation runs"];
-  const navIcons = ["◫", "◇", "▤", "M", "↗"];
+  const nav = [
+    {
+      label: "Overview",
+      icon: "◫",
+      available: true,
+      active: !selectedProject && !showProviderSettings,
+      action: showOverview,
+    },
+    {
+      label: "AI Providers",
+      icon: "⌁",
+      available: true,
+      active: showProviderSettings,
+      action: showProviders,
+    },
+    {
+      label: "Datasets",
+      icon: "▤",
+      available: !!selectedProject,
+      active: !!selectedProject && projectSection === "datasets",
+      action: () => setProjectSection("datasets"),
+    },
+    {
+      label: "Models",
+      icon: "M",
+      available: !!selectedProject,
+      active: !!selectedProject && projectSection === "models",
+      action: () => setProjectSection("models"),
+    },
+    {
+      label: "Evaluation runs",
+      icon: "↗",
+      available: !!selectedProject,
+      active: !!selectedProject && projectSection === "runs",
+      action: () => setProjectSection("runs"),
+    },
+  ];
 
   return (
     <main className="app-shell">
@@ -433,38 +490,19 @@ export default function Dashboard({
           <span>Evalflow</span>
         </div>
         <nav aria-label="Main navigation">
-          {nav.map((item, index) => {
-            const isAvailable = index < 2 || !!selectedProject;
-            const isActive =
-              index === 0
-                ? !selectedProject
-                : index === 1
-                  ? false
-                : index === 2
-                  ? projectSection === "datasets"
-                  : index === 3
-                    ? projectSection === "models"
-                    : projectSection === "runs";
-            return (
+          {nav.map((item) => (
               <button
-                className={`nav-item${isActive ? " active" : ""}`}
-                disabled={!isAvailable}
-                key={item}
-                onClick={
-                  index === 0 || index === 1
-                    ? showOverview
-                    : selectedProject
-                      ? () => setProjectSection(index === 2 ? "datasets" : index === 3 ? "models" : "runs")
-                      : undefined
-                }
+                className={`nav-item${item.active ? " active" : ""}`}
+                disabled={!item.available}
+                key={item.label}
+                onClick={item.available ? item.action : undefined}
                 type="button"
               >
-                <span className="nav-icon">{navIcons[index]}</span>
-                {item}
-                {!isAvailable && <small>select project</small>}
+                <span className="nav-icon">{item.icon}</span>
+                {item.label}
+                {!item.available && <small>select project</small>}
               </button>
-            );
-          })}
+          ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="api-status"><i /> API connected</div>
@@ -482,11 +520,13 @@ export default function Dashboard({
         <header className="topbar">
           <div>
             <span className="breadcrumb">
-              {selectedProject
+              {showProviderSettings
+                ? "Workspace / AI Providers"
+                : selectedProject
                 ? `Workspace / Projects / ${selectedProject.name} / ${projectSection}`
                 : "Workspace / Overview"}
             </span>
-            <h1>{selectedProject?.name ?? "Evaluation overview"}</h1>
+            <h1>{showProviderSettings ? "AI provider credentials" : selectedProject?.name ?? "Evaluation overview"}</h1>
             {selectedProject?.description && (
               <p className="topbar-description">{selectedProject.description}</p>
             )}
@@ -514,7 +554,7 @@ export default function Dashboard({
                 ⇧ Import file
               </button>
             )}
-            {(!selectedProject || projectSection === "datasets") && <button
+            {((!selectedProject && !showProviderSettings) || projectSection === "datasets" && !!selectedProject) && <button
               className="primary-button"
               onClick={
                 selectedProject
@@ -543,6 +583,15 @@ export default function Dashboard({
 
         {loading ? (
           <LoadingState label="Loading your evaluation workspace…" />
+        ) : showProviderSettings ? (
+          <ProviderWorkspace
+            token={token}
+            catalog={providerCatalog}
+            credentials={providerCredentials}
+            onCredentialsChange={setProviderCredentials}
+            onFailure={handleFailure}
+            onNotice={setNotice}
+          />
         ) : selectedProject && projectSection === "datasets" ? (
           <ProjectWorkspace
             datasets={datasets}
@@ -565,6 +614,8 @@ export default function Dashboard({
             token={token}
             project={selectedProject}
             variants={variants}
+            credentials={providerCredentials}
+            providerCatalog={providerCatalog}
             onVariantsChange={setVariants}
             onFailure={handleFailure}
             onNotice={setNotice}

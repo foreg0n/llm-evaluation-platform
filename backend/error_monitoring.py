@@ -18,6 +18,8 @@ _SENSITIVE_KEYS = {
     "apikey",
     "authorization",
     "cookie",
+    "credential_encryption_key",
+    "encrypted_payload",
     "groq_api_key",
     "password",
     "passwd",
@@ -41,12 +43,20 @@ def _normalized_key(value: object) -> str:
     return str(value).strip().lower().replace(" ", "_")
 
 
+def _is_sensitive_key(value: object) -> bool:
+    normalized = _normalized_key(value)
+    return normalized in _SENSITIVE_KEYS or any(
+        marker in normalized
+        for marker in ("api_key", "password", "secret", "credential")
+    )
+
+
 def _scrub_nested(value: Any) -> Any:
     if isinstance(value, dict):
         return {
             key: (
                 FILTERED_VALUE
-                if _normalized_key(key) in _SENSITIVE_KEYS
+                if _is_sensitive_key(key)
                 else _scrub_nested(item)
             )
             for key, item in value.items()

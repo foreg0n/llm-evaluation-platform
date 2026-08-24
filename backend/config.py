@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from binascii import Error as BinasciiError
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from cryptography.fernet import Fernet
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 DEVELOPMENT_AUTH_SECRET = "development-only-change-this-auth-secret-key"
+DEVELOPMENT_CREDENTIAL_ENCRYPTION_KEY = (
+    "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+)
 
 
 class Settings(BaseSettings):
@@ -20,7 +25,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "LLM Evaluation Platform"
-    app_version: str = "0.26.0"
+    app_version: str = "0.27.0"
     environment: str = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
@@ -112,6 +117,10 @@ class Settings(BaseSettings):
         min_length=32,
         validation_alias="AUTH_SECRET_KEY",
     )
+    credential_encryption_key: SecretStr = Field(
+        default=DEVELOPMENT_CREDENTIAL_ENCRYPTION_KEY,
+        validation_alias="CREDENTIAL_ENCRYPTION_KEY",
+    )
     access_token_expire_minutes: int = Field(
         default=30,
         ge=1,
@@ -133,6 +142,17 @@ class Settings(BaseSettings):
             if origin.strip()
         ]
 
+    @field_validator("credential_encryption_key")
+    @classmethod
+    def validate_credential_encryption_key(cls, value: SecretStr) -> SecretStr:
+        try:
+            Fernet(value.get_secret_value().encode("ascii"))
+        except (BinasciiError, TypeError, UnicodeError, ValueError) as exc:
+            raise ValueError(
+                "CREDENTIAL_ENCRYPTION_KEY must be a valid Fernet key"
+            ) from exc
+        return value
+
     @model_validator(mode="after")
     def require_production_auth_secret(self) -> Settings:
         if (
@@ -140,6 +160,14 @@ class Settings(BaseSettings):
             and self.auth_secret_key == DEVELOPMENT_AUTH_SECRET
         ):
             raise ValueError("AUTH_SECRET_KEY must be changed in production")
+        if (
+            self.environment.lower() == "production"
+            and self.credential_encryption_key.get_secret_value()
+            == DEVELOPMENT_CREDENTIAL_ENCRYPTION_KEY
+        ):
+            raise ValueError(
+                "CREDENTIAL_ENCRYPTION_KEY must be changed in production"
+            )
         if self.sentry_enabled and not (
             self.sentry_dsn and self.sentry_dsn.strip()
         ):

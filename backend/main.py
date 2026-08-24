@@ -11,6 +11,7 @@ from backend.api.auth import router as auth_router
 from backend.api.crud import router as crud_router
 from backend.api.health import router as health_router
 from backend.api.metrics import router as metrics_router
+from backend.api.provider_credentials import router as provider_credentials_router
 from backend.api.runs import router as runs_router
 from backend.config import get_settings
 from backend.db.session import dispose_engine
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
     application.include_router(health_router)
     application.include_router(metrics_router)
     application.include_router(auth_router)
+    application.include_router(provider_credentials_router)
     application.include_router(crud_router)
     application.include_router(runs_router)
     application.state.tracer_provider = tracer_provider

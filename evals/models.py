@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 
 class DatasetItem(BaseModel):
@@ -17,6 +17,8 @@ class Variant(BaseModel):
     system_prompt: str | None = None
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_retries: int = Field(default=2, ge=0, le=10)
+    api_key: SecretStr | None = Field(default=None, exclude=True, repr=False)
+    api_base: str | None = Field(default=None, exclude=True, repr=False)
 
 
 class GenerationResponse(BaseModel):

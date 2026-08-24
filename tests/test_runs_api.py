@@ -36,10 +36,16 @@ def run_client(tmp_path: Path) -> Iterator[tuple[TestClient, dict[str, object]]]
             yield session
 
     calls: list[tuple[str, str]] = []
+    credential_keys: list[str | None] = []
     task_manager = RunTaskManager()
 
     async def fake_generate(prompt: str, variant: Variant) -> GenerationResponse:
         calls.append((prompt, variant.name))
+        credential_keys.append(
+            variant.api_key.get_secret_value()
+            if variant.api_key is not None
+            else None
+        )
         if variant.name == "Slow model":
             await asyncio.sleep(30)
         if variant.name == "Broken model":
@@ -77,7 +83,10 @@ def run_client(tmp_path: Path) -> Iterator[tuple[TestClient, dict[str, object]]]
         test_client.headers.update(
             {"Authorization": f"Bearer {logged_in.json()['access_token']}"}
         )
-        yield test_client, {"calls": calls}
+        yield test_client, {
+            "calls": calls,
+            "credential_keys": credential_keys,
+        }
 
     asyncio.run(engine.dispose())
 
@@ -217,6 +226,40 @@ def test_provider_error_is_saved_without_failing_run(run_client) -> None:
     assert len(run["results"]) == 2
     assert sum(result["error"] is not None for result in run["results"]) == 1
     assert sum(summary["error_count"] for summary in run["summary"]) == 1
+
+
+def test_run_resolves_attached_credential_inside_worker(run_client) -> None:
+    client, state = run_client
+    project, dataset, variants = create_run_resources(client)
+    credential = client.post(
+        "/api/v1/provider-credentials",
+        json={
+            "provider": "groq",
+            "name": "Run key",
+            "api_key": "gsk_worker_secret",
+        },
+    ).json()
+    attached = client.patch(
+        f"/api/v1/variants/{variants[0]['id']}",
+        json={"credential_id": credential["id"]},
+    )
+    assert attached.status_code == 200
+
+    accepted = client.post(
+        "/api/v1/runs",
+        json={
+            "project_id": project["id"],
+            "dataset_id": dataset["id"],
+            "variant_ids": [variants[0]["id"]],
+        },
+    )
+    run = wait_for_terminal_run(client, accepted.json()["id"])
+
+    assert run["status"] == "completed"
+    assert state["credential_keys"] == ["gsk_worker_secret"]
+    saved_credential = client.get("/api/v1/provider-credentials").json()[0]
+    assert saved_credential["last_used_at"] is not None
+    assert "gsk_worker_secret" not in str(run)
 
 
 def test_run_rejects_empty_dataset(run_client) -> None:

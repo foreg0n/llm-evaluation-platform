@@ -312,6 +312,33 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 .three-fields { grid-template-columns: repeat(3, 1fr); }
 .modal select { width: 100%; height: 44px; padding: 0 13px; border: 1px solid #30364a; border-radius: 8px; color: #d7dae4; background: #0e111b; outline: none; }
 .modal select:focus { border-color: var(--purple); }
+
+/* Provider credentials */
+.provider-intro { background: radial-gradient(circle at 88% 22%, rgb(78 166 255 / 0.12), transparent 28%), var(--surface); }
+.provider-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 13px; }
+.provider-summary article { min-height: 100px; }
+.provider-summary span { color: #697187; font-size: 8px; font-weight: 800; letter-spacing: 0.1em; }
+.provider-summary strong { display: block; margin-top: 10px; font-size: 25px; }
+.provider-summary small { color: #697187; font-size: 9px; }
+.provider-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 13px; }
+.provider-card { display: flex; min-height: 290px; flex-direction: column; }
+.provider-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.provider-logo { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid #333a52; border-radius: 11px; color: #b8adff; background: linear-gradient(145deg, #1f2440, #151827); font-size: 16px; font-weight: 850; }
+.credential-status { padding: 5px 8px; border-radius: 999px; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.credential-connected { color: #78dfbb; background: rgb(66 214 164 / 0.11); }
+.credential-untested { color: #8ec9ff; background: rgb(78 166 255 / 0.11); }
+.credential-invalid { color: #f28b98; background: rgb(242 111 125 / 0.11); }
+.provider-card h3 { margin: 7px 0 12px; font-size: 16px; }
+.provider-card > code { display: block; padding: 9px 11px; border: 1px solid #292f42; border-radius: 8px; color: #a8b0c4; background: #0d1019; font-size: 10px; letter-spacing: 0.08em; }
+.provider-base { overflow: hidden; margin-top: 8px; color: #687187; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.provider-card-meta { display: flex; align-items: center; justify-content: space-between; margin: 22px 0 14px; padding-top: 14px; border-top: 1px solid #242a3b; font-size: 8px; }
+.provider-card-meta span { color: #646c80; text-transform: uppercase; }
+.provider-card-meta strong { color: #aab1c2; font-size: 9px; font-weight: 650; }
+.provider-card .variant-actions { margin-top: auto; }
+.credential-safety-note { display: flex; gap: 11px; margin-top: 15px; padding: 12px; border: 1px solid rgb(66 214 164 / 0.2); border-radius: 9px; color: #819089; background: rgb(66 214 164 / 0.05); font-size: 9px; line-height: 1.5; }
+.credential-safety-note > span { display: grid; width: 23px; height: 23px; flex: 0 0 auto; place-items: center; border-radius: 50%; color: #69d8b2; background: rgb(66 214 164 / 0.12); }
+.credential-safety-note p { margin: 0; }
+.credential-safety-note strong { color: #a8cbbb; }
 .workflow-warning { margin: 13px 0 0; padding: 11px 14px; border: 1px solid rgb(245 166 91 / 0.25); border-radius: 9px; color: #d9a474; background: rgb(245 166 91 / 0.07); font-size: 10px; }
 .comparison-form-warning { padding: 10px 12px; border: 1px solid rgb(245 166 91 / 0.22); border-radius: 8px; color: #d8a170; background: rgb(245 166 91 / 0.06); font-size: 9px; }
 .run-comparison-panel { margin-top: 13px; padding: 0; overflow: hidden; }
@@ -453,6 +480,7 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
   .dataset-detail-head { flex-direction: column; }
   .dataset-actions { justify-content: flex-start; }
   .variant-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .provider-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-workspace { grid-template-columns: 230px minmax(0, 1fr); }
   .comparison-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .result-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -504,6 +532,7 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
   .dataset-actions { width: 100%; }
   .dataset-actions .primary-button { flex: 1; }
   .variant-grid { grid-template-columns: 1fr; }
+  .provider-grid, .provider-summary { grid-template-columns: 1fr; }
   .run-workspace { grid-template-columns: 1fr; }
   .run-list-panel, .run-detail-panel { min-height: auto; }
   .run-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }

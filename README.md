@@ -1,8 +1,9 @@
 # LLM Evaluation Platform
 
-A full-stack evaluation platform for comparing real language models on
-GroqCloud. It combines an asynchronous CLI, a FastAPI and PostgreSQL backend,
-and a dark analytics frontend for everyday experiment management.
+A full-stack evaluation platform for comparing real language models across
+multiple AI providers. It combines an asynchronous CLI, a FastAPI and
+PostgreSQL backend, and a dark analytics frontend for everyday experiment
+management.
 
 ## Development Approach
 
@@ -18,7 +19,12 @@ complete workflow.
 
 ## Features
 
-- Real GroqCloud API calls through LiteLLM
+- Real multi-provider API calls through LiteLLM
+- Per-user BYOK credentials encrypted at rest with Fernet
+- Built-in setup for Groq, OpenAI, Anthropic, Gemini, OpenRouter, Mistral,
+  DeepSeek, xAI, Cohere, Together AI, Fireworks AI, Perplexity, Cerebras, and
+  SambaNova
+- Custom OpenAI-compatible endpoint support
 - Qwen 3.6 27B and GPT-OSS 20B compared in every default run
 - Asynchronous requests with configurable concurrency
 - A shared provider protocol for clean model integration
@@ -28,7 +34,7 @@ complete workflow.
 - Configurable timeouts and bounded exponential-backoff retries
 - Error isolation: one failed request does not stop the evaluation run
 - Rich terminal summary and a reproducible JSON report
-- Network-free tests using mocked Groq responses
+- Network-free tests using mocked provider responses
 - FastAPI application with a database-aware health endpoint
 - Async SQLAlchemy models and an Alembic migration for experiment history
 - Versioned CRUD API for projects, datasets, dataset items, and model variants
@@ -65,7 +71,7 @@ complete workflow.
 
 - Python 3.12 or newer
 - Node.js 22.13 or newer and npm
-- A GroqCloud account and API key for real evaluations
+- An API key for at least one supported AI provider
 - PostgreSQL for the backend API
 - Docker Engine with Docker Compose for the containerized full stack
 
@@ -102,11 +108,22 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-## Groq API Key
+## Provider API Keys
 
-1. Sign in to the [GroqCloud Console](https://console.groq.com/).
-2. Create a key on the [Groq API Keys page](https://console.groq.com/keys).
-3. Copy the environment template:
+The web application uses per-user bring-your-own-key (BYOK) credentials. After
+signing in, open **AI Providers**, choose a provider, and save its API key. The
+key is encrypted before it reaches PostgreSQL and is never returned to the
+browser. Attach the saved credential when creating or editing a model variant.
+
+The built-in catalog includes the most common key-based LiteLLM providers. Use
+**Custom OpenAI-compatible** for another service that exposes an OpenAI-style
+API, and provide its HTTP(S) base URL. Use HTTPS outside local development. A
+credential is sent to a provider only when you explicitly test it or run an
+evaluation.
+
+The CLI can still use a server-side Groq key. Create one in the
+[GroqCloud Console](https://console.groq.com/keys), then copy the environment
+template:
 
 Windows PowerShell:
 
@@ -120,14 +137,16 @@ macOS or Linux:
 cp .env.example .env
 ```
 
-4. Add your key to `.env`:
+Add the key to `.env`:
 
 ```dotenv
 GROQ_API_KEY=your-secret-groq-key
 ```
 
-The `.env` file is ignored by Git. Never commit, publish, or share your API
-key. Revoke it immediately in the GroqCloud Console if it is exposed.
+`GROQ_API_KEY` is optional for web variants that have a saved credential, but
+keeps the default CLI workflow and legacy server-environment fallback working.
+The `.env` file is ignored by Git. Never commit, publish, or share API keys;
+revoke an exposed key immediately in its provider console.
 
 ## Starting the Backend
 
@@ -137,6 +156,7 @@ Create a PostgreSQL database, then set its async SQLAlchemy URL in `.env`:
 DATABASE_URL=postgresql+asyncpg://postgres:change-me@localhost:5432/llm_evaluation
 DATABASE_ECHO=false
 AUTH_SECRET_KEY=replace-with-a-random-secret
+CREDENTIAL_ENCRYPTION_KEY=replace-with-a-fernet-key
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 ```
 
@@ -150,6 +170,16 @@ Copy the printed value into `AUTH_SECRET_KEY`. JWT payloads are signed, not
 encrypted, so never put passwords, API keys, or other secrets inside them. Use
 HTTPS outside local development.
 
+Generate the separate Fernet key used to encrypt provider credentials:
+
+```powershell
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Copy it into `CREDENTIAL_ENCRYPTION_KEY`. Back it up securely: replacing this
+value makes existing saved credentials unreadable. Production startup rejects
+the development default.
+
 Create or update the database schema:
 
 ```bash
@@ -160,6 +190,9 @@ Migration `20260815_0003` preserves projects created before authentication by
 assigning them to an inactive `legacy-import@local.invalid` account. After you
 register, a database administrator may explicitly reassign those projects to
 your new user ID; they are never exposed automatically.
+
+Migration `20260824_0004` adds encrypted per-user provider credentials and the
+optional credential link on model variants.
 
 Start the API from the repository root:
 
@@ -182,13 +215,16 @@ Create `.env` if it does not exist, then set at least these values:
 ```dotenv
 POSTGRES_PASSWORD=choose-a-long-url-safe-password
 AUTH_SECRET_KEY=replace-with-64-random-hex-characters
+CREDENTIAL_ENCRYPTION_KEY=replace-with-a-generated-fernet-key
+# Optional CLI/server fallback:
 GROQ_API_KEY=your-secret-groq-key
 ```
 
-Generate `AUTH_SECRET_KEY` with:
+Generate both application secrets with:
 
 ```powershell
 python -c "import secrets; print(secrets.token_hex(32))"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 Do not commit `.env`. The Docker build contexts explicitly exclude `.env`,
@@ -528,6 +564,13 @@ support `offset` and `limit` query parameters; `limit` is capped at 100.
 | Datasets | `POST/GET /api/v1/projects/{project_id}/datasets` | `/api/v1/datasets/{dataset_id}` |
 | Dataset items | `POST/GET /api/v1/datasets/{dataset_id}/items` | `/api/v1/dataset-items/{item_id}` |
 | Variants | `POST/GET /api/v1/projects/{project_id}/variants` | `/api/v1/variants/{variant_id}` |
+| Provider credentials | `POST/GET /api/v1/provider-credentials` | `/api/v1/provider-credentials/{credential_id}` |
+
+The authenticated provider catalog is available at
+`GET /api/v1/providers/catalog`. Test a saved credential explicitly with
+`POST /api/v1/provider-credentials/{credential_id}/test`; its body contains the
+provider-specific LiteLLM model ID. Testing makes one minimal real API request.
+Deleting a credential attached to a model variant returns `409`.
 
 ### Importing a Dataset File
 
@@ -560,20 +603,23 @@ POST /api/v1/projects/{project_id}/datasets/import
 The complete experiment workflow is available without writing API requests:
 
 1. Open a project and import or create a dataset with test cases.
-2. Open **Models** and add the Groq model variants you want to compare.
-   Evalflow includes suggestions for Qwen 3.6 27B and GPT OSS 20B, while the
-   model ID field also accepts other LiteLLM-compatible Groq model IDs.
-3. Open **Evaluation runs**, choose a dataset, select one or more models, set
+2. Open **AI Providers** and add or test your personal provider credentials.
+3. Open **Models**, add the model variants you want to compare, enter their
+   LiteLLM model IDs, and attach the matching saved credentials. Evalflow also
+   includes Groq suggestions for Qwen 3.6 27B and GPT OSS 20B.
+4. Open **Evaluation runs**, choose a dataset, select one or more models, set
    the number of parallel workers, and select **Start evaluation**.
-4. Keep the run open to see task progress and partial results refresh every
+5. Keep the run open to see task progress and partial results refresh every
    1.5 seconds. You may cancel a pending or running evaluation.
-5. Inspect the model leaderboard and expand individual prompts to compare the
+6. Inspect the model leaderboard and expand individual prompts to compare the
    expected answer with each model output.
 
-The frontend never receives `GROQ_API_KEY`; the browser calls the authenticated
-backend, and only the backend worker communicates with GroqCloud. A provider
-failure is shown on its individual task row and does not hide successful model
-results from the same run.
+The frontend never receives plaintext provider keys after submission. The
+browser calls the authenticated backend, credentials are decrypted only while
+the worker prepares a provider request, and Celery messages contain only the
+run ID. Keys are excluded from model serialization, logs, traces, and persisted
+results. A provider failure is shown on its individual task row and does not
+hide successful model results from the same run.
 
 ### Live Run Analytics
 
@@ -782,8 +828,9 @@ pytest
 
 Tests inject mocked completion functions into `LiteLLMProvider` and the run API.
 Backend integration tests use a temporary SQLite database and cover registration,
-login, expired tokens, protected routes, and cross-user isolation. They do not
-read your API key, send requests to GroqCloud, or modify PostgreSQL.
+login, expired tokens, encrypted provider credentials, protected routes, and
+cross-user isolation. They do not read your real API keys, send provider
+requests, or modify PostgreSQL.
 
 ## Dataset Format
 
@@ -829,8 +876,8 @@ class AsyncLLMProvider(Protocol):
 ```
 
 `LiteLLMProvider` implements this interface with `litellm.acompletion` and maps
-a Groq completion into the project's `GenerationResponse`, including token and
-cost data. The runner creates one task per dataset-item/model pair and uses an
+provider completions into the project's `GenerationResponse`, including token
+and cost data. The runner creates one task per dataset-item/model pair and uses an
 `asyncio.Semaphore` to enforce the requested concurrency limit. Temporary
 connection, timeout, rate-limit, server, and invalid-response failures use
 bounded exponential backoff. Authentication and validation errors fail
@@ -848,9 +895,11 @@ llm-evaluation-platform/
 │   ├── services/
 │   ├── worker/
 │   ├── config.py
+│   ├── credential_security.py
 │   ├── error_monitoring.py
 │   ├── metrics.py
 │   ├── observability.py
+│   ├── provider_catalog.py
 │   ├── security.py
 │   ├── tracing.py
 │   └── main.py
@@ -871,7 +920,8 @@ llm-evaluation-platform/
 │   │   ├── evaluation-workspace.tsx
 │   │   ├── globals.css
 │   │   ├── layout.tsx
-│   │   └── page.tsx
+│   │   ├── page.tsx
+│   │   └── provider-workspace.tsx
 │   ├── public/
 │   ├── tests/
 │   ├── Dockerfile
@@ -902,8 +952,8 @@ llm-evaluation-platform/
 ## Current Scope
 
 The asynchronous CLI, authenticated CRUD API, persisted API-managed runs, and
-the core frontend experiment workflow are usable today. The backend includes configuration,
-FastAPI, PostgreSQL migrations, validation, per-user ownership, selectable
+the core frontend experiment workflow are usable today. The backend includes
+configuration, FastAPI, PostgreSQL migrations, validation, per-user ownership, selectable
 in-process or Redis/Celery execution, progress, cancellation, resumable
 delivery, summaries, and result history. The frontend includes authentication,
 real overview statistics, projects, recent runs, project creation, project
@@ -928,6 +978,10 @@ strict event scrubbing, while leaving OpenTelemetry as the only tracing layer.
 The complete application also has production-oriented, non-root Docker images
 and a dependency-ordered Compose topology with persistent PostgreSQL/Redis,
 automatic migrations, localhost-only published ports, and health-gated startup.
+Users can manage encrypted BYOK credentials for multiple providers from the UI,
+test them explicitly, and bind different credentials to individual model
+variants. The worker resolves those credentials at execution time without
+placing plaintext secrets in Celery messages or evaluation records.
 
 Refresh tokens, password recovery, email verification, production Redis
 security, model-catalog discovery, large-run pagination, notification delivery,

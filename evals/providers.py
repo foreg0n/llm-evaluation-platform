@@ -67,6 +67,13 @@ class LiteLLMProvider:
 
         while True:
             try:
+                credential_options: dict[str, str] = {}
+                if variant.api_key is not None:
+                    credential_options["api_key"] = (
+                        variant.api_key.get_secret_value()
+                    )
+                if variant.api_base is not None:
+                    credential_options["api_base"] = variant.api_base
                 response = await self._completion(
                     model=variant.model,
                     messages=messages,
@@ -74,6 +81,7 @@ class LiteLLMProvider:
                     max_tokens=variant.max_tokens,
                     timeout=variant.timeout_seconds,
                     num_retries=0,
+                    **credential_options,
                 )
                 return self._to_generation_response(
                     response=response,
@@ -85,8 +93,14 @@ class LiteLLMProvider:
                     retry_count >= variant.max_retries
                     or not self._is_retryable(exc)
                 ):
+                    message = f"{type(exc).__name__}: {exc}"
+                    if variant.api_key is not None:
+                        message = message.replace(
+                            variant.api_key.get_secret_value(),
+                            "[Filtered]",
+                        )
                     raise ProviderExecutionError(
-                        f"{type(exc).__name__}: {exc}",
+                        message,
                         retry_count=retry_count,
                     ) from exc
 

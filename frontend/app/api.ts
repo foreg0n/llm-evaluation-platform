@@ -40,11 +40,33 @@ export type ModelVariant = {
   name: string;
   model: string;
   provider: string;
+  credential_id: string | null;
   temperature: number;
   max_tokens: number | null;
   system_prompt: string | null;
   timeout_seconds: number;
   max_retries: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProviderCatalogEntry = {
+  slug: string;
+  label: string;
+  model_prefix: string;
+  api_key_placeholder: string;
+  supports_custom_base_url: boolean;
+};
+
+export type ProviderCredential = {
+  id: string;
+  provider: string;
+  name: string;
+  key_hint: string;
+  api_base: string | null;
+  status: "untested" | "connected" | "invalid";
+  last_checked_at: string | null;
+  last_used_at: string | null;
   created_at: string;
   updated_at: string;
 };

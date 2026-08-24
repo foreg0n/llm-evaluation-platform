@@ -7,9 +7,24 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import Dataset, DatasetItem, EvaluationRun, Project, Variant
+from backend.db.models import (
+    Dataset,
+    DatasetItem,
+    EvaluationRun,
+    Project,
+    ProviderCredential,
+    Variant,
+)
 
-OwnedModel = TypeVar("OwnedModel", Project, Dataset, DatasetItem, Variant, EvaluationRun)
+OwnedModel = TypeVar(
+    "OwnedModel",
+    Project,
+    Dataset,
+    DatasetItem,
+    Variant,
+    EvaluationRun,
+    ProviderCredential,
+)
 
 
 async def _owned_or_404(
@@ -70,6 +85,21 @@ async def get_owned_variant(
         .join(Project)
         .where(Variant.id == variant_id, Project.owner_id == owner_id),
         "Variant",
+    )
+
+
+async def get_owned_provider_credential(
+    session: AsyncSession,
+    owner_id: uuid.UUID,
+    credential_id: uuid.UUID,
+) -> ProviderCredential:
+    return await _owned_or_404(
+        session,
+        select(ProviderCredential).where(
+            ProviderCredential.id == credential_id,
+            ProviderCredential.user_id == owner_id,
+        ),
+        "Provider credential",
     )
 
 

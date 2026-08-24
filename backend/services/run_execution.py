@@ -9,7 +9,9 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
+from pydantic import SecretStr
 
+from backend.credential_security import CredentialCipher, get_credential_cipher
 from backend.db.models import (
     DatasetItem,
     EvaluationResult as DatabaseEvaluationResult,
@@ -36,7 +38,16 @@ class RunCancelledError(RuntimeError):
     """Stop new work after the API records cooperative cancellation."""
 
 
-def _core_variant(variant: DatabaseVariant) -> CoreVariant:
+def _core_variant(
+    variant: DatabaseVariant,
+    cipher: CredentialCipher,
+) -> CoreVariant:
+    api_key: SecretStr | None = None
+    api_base: str | None = None
+    if variant.credential is not None:
+        payload = cipher.decrypt(variant.credential.encrypted_payload)
+        api_key = SecretStr(payload["api_key"])
+        api_base = payload["api_base"]
     return CoreVariant(
         name=variant.name,
         model=variant.model,
@@ -46,6 +57,8 @@ def _core_variant(variant: DatabaseVariant) -> CoreVariant:
         system_prompt=variant.system_prompt,
         timeout_seconds=variant.timeout_seconds,
         max_retries=variant.max_retries,
+        api_key=api_key,
+        api_base=api_base,
     )
 
 
@@ -101,6 +114,7 @@ async def execute_evaluation_run(
     """Execute one persisted run outside the request-scoped DB session."""
 
     execution_started_at = time.perf_counter()
+    credential_cipher = get_credential_cipher()
     set_error_context(run_id=run_id)
     metrics_active = False
     async with session_factory() as session:
@@ -108,7 +122,12 @@ async def execute_evaluation_run(
             run_query = (
                 select(EvaluationRun)
                 .where(EvaluationRun.id == run_id)
-                .options(selectinload(EvaluationRun.variants))
+                .options(
+                    selectinload(EvaluationRun.project),
+                    selectinload(EvaluationRun.variants).selectinload(
+                        DatabaseVariant.credential
+                    ),
+                )
             )
             run = (await session.scalars(run_query)).one()
             if run.status in {"completed", "cancelled"}:
@@ -127,6 +146,12 @@ async def execute_evaluation_run(
             )
             if not items or not ordered_variants:
                 raise RuntimeError("Run inputs are no longer available")
+            if any(
+                variant.credential is not None
+                and variant.credential.user_id != run.project.owner_id
+                for variant in ordered_variants
+            ):
+                raise RuntimeError("Run contains a credential owned by another user")
 
             existing_results = list(
                 (
@@ -154,6 +179,10 @@ async def execute_evaluation_run(
             run.total_tasks = len(items) * len(ordered_variants)
             run.completed_tasks = len(existing_results)
             run.error = None
+            used_at = datetime.now(UTC)
+            for variant in ordered_variants:
+                if variant.credential is not None:
+                    variant.credential.last_used_at = used_at
             await session.commit()
             EVALUATION_RUNS_IN_PROGRESS.inc()
             metrics_active = True
@@ -176,7 +205,10 @@ async def execute_evaluation_run(
                 )
                 for item in items
             ]
-            core_variants = [_core_variant(variant) for variant in ordered_variants]
+            core_variants = [
+                _core_variant(variant, credential_cipher)
+                for variant in ordered_variants
+            ]
             item_ids = {str(item.id): item.id for item in items}
             variant_ids = {
                 variant.name: variant.id for variant in ordered_variants

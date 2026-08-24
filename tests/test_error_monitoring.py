@@ -47,6 +47,7 @@ def test_sentry_event_scrubber_removes_request_and_nested_secrets() -> None:
             "safe": "visible",
             "password": "secret",
             "nested": {"api_key": "secret", "count": 2},
+            "encrypted_payload": "ciphertext",
         },
         "breadcrumbs": {
             "values": [{"data": {"token": "secret", "step": "queue"}}]
@@ -68,6 +69,7 @@ def test_sentry_event_scrubber_removes_request_and_nested_secrets() -> None:
         "safe": "visible",
         "password": FILTERED_VALUE,
         "nested": {"api_key": FILTERED_VALUE, "count": 2},
+        "encrypted_payload": FILTERED_VALUE,
     }
     assert scrubbed["breadcrumbs"]["values"][0]["data"] == {
         "token": FILTERED_VALUE,
@@ -106,7 +108,7 @@ def test_sentry_configuration_disables_pii_bodies_and_tracing(monkeypatch) -> No
     assert enabled is True
     assert init_options["dsn"] == "https://public@example.invalid/1"
     assert init_options["environment"] == "staging"
-    assert init_options["release"] == "llm-evaluation-platform@0.26.0"
+    assert init_options["release"] == "llm-evaluation-platform@0.27.0"
     assert init_options["sample_rate"] == 0.25
     assert init_options["traces_sample_rate"] == 0.0
     assert init_options["profiles_sample_rate"] == 0.0

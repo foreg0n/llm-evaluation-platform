@@ -24,6 +24,7 @@ from backend.api.ownership import (
     get_owned_dataset,
     get_owned_dataset_item,
     get_owned_project,
+    get_owned_provider_credential,
     get_owned_variant,
 )
 from backend.db.models import Dataset, DatasetItem, Project, Variant
@@ -425,6 +426,10 @@ async def create_variant(
     current_user: CurrentUserDependency,
 ) -> Variant:
     await get_owned_project(session, current_user.id, project_id)
+    if payload.credential_id is not None:
+        await get_owned_provider_credential(
+            session, current_user.id, payload.credential_id
+        )
     values = payload.model_dump() | {"project_id": project_id}
     return await _create(
         session,
@@ -476,6 +481,10 @@ async def update_variant(
     current_user: CurrentUserDependency,
 ) -> Variant:
     variant = await get_owned_variant(session, current_user.id, variant_id)
+    if payload.credential_id is not None:
+        await get_owned_provider_credential(
+            session, current_user.id, payload.credential_id
+        )
     return await _update(
         session,
         variant,
