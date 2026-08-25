@@ -77,6 +77,10 @@ complete workflow.
   production container builds
 - Weekly Dependabot updates for GitHub Actions, Python, npm, and Docker
 - Production-oriented Docker images and one-command full-stack Compose startup
+- Separate hardened production topology with automatic HTTPS through Caddy
+- Private database/queue networks and password-authenticated production Redis
+- Tag-driven multi-architecture API/frontend releases to GitHub Container Registry
+- Build provenance and software bill of materials for published container images
 
 ## Requirements
 
@@ -882,7 +886,7 @@ token usage, estimated cost, retry count, and provider errors for every item.
 ## Continuous Integration
 
 The `.github/workflows/ci.yml` workflow runs on pushes to `main`, pull requests,
-and manual dispatches. It grants the generated `GITHUB_TOKEN` only
+manual dispatches, and as the reusable quality gate for releases. It grants the generated `GITHUB_TOKEN` only
 `contents: read` and never loads real provider, SMTP, database, or deployment
 secrets.
 
@@ -894,8 +898,8 @@ The quality gate contains four jobs:
 2. **Frontend lint, build, and tests** — installs the exact npm lockfile on
    Node.js 22, runs ESLint, builds the production Vinext bundle, and executes
    server-render/security tests.
-3. **Compose validation** — parses the complete production configuration with
-   non-secret CI placeholder values.
+3. **Compose validation** — parses both the local full-stack and hardened
+   production configurations with non-secret CI placeholder values.
 4. **Container builds** — runs only after the first three jobs pass and builds
    both non-root production images without pushing them to a registry.
 
@@ -905,8 +909,35 @@ environments or `node_modules`. Dependabot checks GitHub Actions, pip, npm, and
 both Dockerfiles every week.
 
 The workflow intentionally uses `pull_request`, not `pull_request_target`, and
-has no publish/deploy credentials. A later deployment workflow can consume this
-CI result through a protected environment and explicit approval.
+has no publish/deploy credentials. The separate release workflow receives only
+`contents: read` and `packages: write`, and only after the complete reusable CI
+workflow succeeds.
+
+## Production Releases and HTTPS Deployment
+
+Pushing a semantic version tag such as `v0.31.0` starts
+`.github/workflows/release.yml`. It reruns the complete CI quality gate, then
+builds Linux AMD64 and ARM64 API/frontend images and publishes exact-version,
+minor-version, and stable `latest` tags to GitHub Container Registry. Published
+images include OCI source/revision labels, build provenance, and an SBOM. No
+server credentials are stored in GitHub and the workflow does not deploy to a
+machine automatically.
+
+`compose.production.yaml` is intentionally separate from the local development
+stack. It pulls immutable release images, forces secure refresh cookies, uses
+Redis-backed authentication rate limiting, requires database/Redis/application
+secrets, and exposes only Caddy on ports `80` and `443`. PostgreSQL and Redis
+share an internal Docker network; the Celery worker receives outbound network
+access for model-provider calls without publishing a host port. Caddy obtains
+and renews the domain certificate, redirects HTTP to HTTPS, adds baseline
+security headers, and routes `/api/*` and `/health` to FastAPI. `/ready`,
+`/metrics`, API documentation, databases, and worker metrics stay private.
+
+Copy `.env.production.example` to `.env.production`, replace every placeholder,
+point the domain DNS record at the server, and follow the validation, release,
+upgrade, and rollback commands in [DEPLOYMENT.md](DEPLOYMENT.md). The production
+environment file is explicitly ignored by Git; only its placeholder template is
+tracked.
 
 ## Running Tests
 
@@ -993,6 +1024,8 @@ llm-evaluation-platform/
 │   ├── tracing.py
 │   └── main.py
 ├── Dockerfile
+├── deploy/
+│   └── Caddyfile
 ├── evals/
 │   ├── datasets/
 │   │   └── questions.jsonl
@@ -1029,7 +1062,9 @@ llm-evaluation-platform/
 ├── artifacts/
 ├── tests/
 ├── .env.example
+├── .env.production.example
 ├── .dockerignore
+├── compose.production.yaml
 ├── compose.yaml
 ├── compose.observability.yaml
 ├── compose.redis.yaml
@@ -1065,8 +1100,13 @@ to the local Tempo datasource in Grafana. Optional Sentry integration captures
 unhandled API, worker, and persisted-run failures with correlation tags and
 strict event scrubbing, while leaving OpenTelemetry as the only tracing layer.
 The complete application also has production-oriented, non-root Docker images
-and a dependency-ordered Compose topology with persistent PostgreSQL/Redis,
+and a dependency-ordered local Compose topology with persistent PostgreSQL/Redis,
 automatic migrations, localhost-only published ports, and health-gated startup.
+The separate production topology adds Caddy-managed HTTPS, same-origin API
+routing, security headers, private service networks, authenticated Redis, and
+required secret interpolation. Semantic Git tags run the complete reusable CI
+gate before multi-architecture API and frontend images with provenance and an
+SBOM are published to GHCR.
 Users can manage encrypted BYOK credentials for multiple providers from the UI,
 test them explicitly, and bind different credentials to individual model
 variants. The worker resolves those credentials at execution time without
@@ -1078,6 +1118,7 @@ New accounts require email verification, and the password-recovery flow uses
 short-lived one-time tokens, generic request responses, and all-session
 revocation after a successful reset.
 
-Production Redis security, model-catalog discovery, large-run pagination,
-durable email/notification delivery, automated error/alert notification
-delivery, release publishing, and public cloud deployment remain future stages.
+Model-catalog discovery, large-run pagination, durable email/notification
+delivery, automated error/alert notification delivery, infrastructure
+provisioning, backups, and the first public cloud deployment remain future
+stages.

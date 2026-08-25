@@ -16,7 +16,12 @@ def test_ci_has_read_only_permissions_and_safe_triggers() -> None:
     workflow = load_yaml(workflow_path)
     triggers = workflow.get("on", workflow.get(True))
 
-    assert set(triggers) == {"push", "pull_request", "workflow_dispatch"}
+    assert set(triggers) == {
+        "workflow_call",
+        "push",
+        "pull_request",
+        "workflow_dispatch",
+    }
     assert workflow["permissions"] == {"contents": "read"}
     assert "pull_request_target" not in workflow_text
     assert "secrets." not in workflow_text
@@ -43,6 +48,8 @@ def test_ci_covers_backend_frontend_configuration_and_images() -> None:
     assert "npm run lint" in all_runs
     assert "npm test" in all_runs
     assert "docker compose config --quiet" in all_runs
+    assert "compose.production.yaml config --quiet" in all_runs
+    assert "caddy validate --config /etc/caddy/Caddyfile" in all_runs
     assert "docker build --tag evalflow-api:ci ." in all_runs
     assert "--tag evalflow-frontend:ci" in all_runs
 

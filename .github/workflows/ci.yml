@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
@@ -86,6 +87,25 @@ jobs:
           AUTH_SECRET_KEY: ci-auth-secret-key-with-at-least-32-characters
           CREDENTIAL_ENCRYPTION_KEY: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
         run: docker compose config --quiet
+      - name: Validate production Compose file
+        env:
+          APP_DOMAIN: evalflow.example.com
+          ACME_EMAIL: ops@example.com
+          EVALFLOW_API_IMAGE: ghcr.io/example/evalflow-api:ci
+          EVALFLOW_FRONTEND_IMAGE: ghcr.io/example/evalflow-frontend:ci
+          POSTGRES_PASSWORD: ci-postgres-password
+          REDIS_PASSWORD: ci-redis-password
+          AUTH_SECRET_KEY: ci-auth-secret-key-with-at-least-32-characters
+          CREDENTIAL_ENCRYPTION_KEY: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+        run: docker compose -f compose.production.yaml config --quiet
+      - name: Validate Caddy HTTPS configuration
+        run: >-
+          docker run --rm
+          --env APP_DOMAIN=evalflow.example.com
+          --env ACME_EMAIL=ops@example.com
+          --volume "${PWD}/deploy/Caddyfile:/etc/caddy/Caddyfile:ro"
+          caddy:2.10.2-alpine
+          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
   containers:
     name: Build production containers
