@@ -79,6 +79,7 @@ class UserRead(ORMModel):
     id: uuid.UUID
     email: EmailStr
     is_active: bool
+    email_verified_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -87,6 +88,27 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class AccountEmailRequest(BaseModel):
+    email: EmailStr
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class AccountTokenRequest(BaseModel):
+    token: Annotated[SecretStr, Field(min_length=32, max_length=256)]
+
+
+class PasswordResetConfirm(AccountTokenRequest):
+    new_password: Annotated[str, Field(min_length=8, max_length=128)]
+
+
+class MessageResponse(BaseModel):
+    message: str
 
 
 class DatasetCreate(BaseModel):

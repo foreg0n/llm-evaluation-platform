@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render() {
@@ -22,4 +23,21 @@ test("server-renders the Evalflow authentication surface", async () => {
   assert.match(html, /Welcome back/);
   assert.match(html, /LLM EVALUATION WORKSPACE/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview/);
+});
+
+test("keeps access tokens out of browser storage and enables cookie refresh", async () => {
+  const [pageSource, apiSource, authSource] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/auth-screen.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(pageSource, /sessionStorage|localStorage/);
+  assert.match(apiSource, /credentials:\s*"include"/);
+  assert.match(apiSource, /let refreshPromise:/);
+  assert.match(apiSource, /\/api\/v1\/auth\/refresh/);
+  assert.match(authSource, /email-verification\/confirm/);
+  assert.match(authSource, /password-reset\/confirm/);
+  assert.match(authSource, /window\.location\.hash/);
+  assert.doesNotMatch(authSource, /sessionStorage|localStorage/);
 });

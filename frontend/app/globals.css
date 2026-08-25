@@ -87,6 +87,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .auth-form input:focus, .modal input:focus, .modal textarea:focus { border-color: var(--purple); outline: 0; box-shadow: 0 0 0 3px rgb(128 103 255 / 0.12); }
 .auth-submit { width: 100%; min-height: 48px; margin-top: 3px; }
 .form-error { margin: -4px 0 0; padding: 10px 12px; border: 1px solid rgb(242 111 125 / 0.3); border-radius: 8px; color: #ff9aa5; background: rgb(242 111 125 / 0.08); font-size: 12px; }
+.form-notice { margin: -4px 0 0; padding: 10px 12px; border: 1px solid rgb(66 214 164 / 0.28); border-radius: 8px; color: #80dfbe; background: rgb(66 214 164 / 0.08); font-size: 12px; line-height: 1.5; }
+.auth-link { align-self: center; border: 0; color: #aaa0ff; background: transparent; cursor: pointer; font-size: 12px; font-weight: 650; }
+.auth-link:hover { color: #c8c2ff; }
+.auth-link:disabled { cursor: not-allowed; opacity: 0.55; }
 .auth-footnote { max-width: 460px; margin: 22px 0 auto; color: #656b7d; font-size: 11px; line-height: 1.5; text-align: center; }
 .auth-visual { position: relative; display: grid; place-items: center; min-height: 100vh; overflow: hidden; padding: 72px; background: radial-gradient(circle at 48% 45%, #17142c 0, #090b14 52%, #070810 100%); }
 .auth-visual::before { position: absolute; inset: 0; background-image: linear-gradient(rgb(255 255 255 / 0.025) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 0.025) 1px, transparent 1px); background-size: 52px 52px; content: ""; mask-image: radial-gradient(circle, #000 20%, transparent 76%); }

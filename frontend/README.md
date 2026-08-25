@@ -4,6 +4,10 @@ Dark analytics interface for the LLM Evaluation Platform. It uses the existing
 FastAPI registration, JWT login, project, dataset, dataset-item, provider
 credential, model-variant, and evaluation-run endpoints.
 
+The authentication surface includes email verification, verification resend,
+forgot-password, and one-time password-reset flows. Action tokens are read from
+the URL fragment and removed from browser history immediately.
+
 The current UI supports project selection plus creating, editing, and deleting
 datasets and their test cases. Every test case stores an external ID, input
 prompt, expected output, and evaluation keywords.
@@ -31,8 +35,10 @@ npm test
 npm run lint
 ```
 
-JWT access tokens are stored in `sessionStorage`, so closing the browser tab
-ends the local frontend session. Provider keys are submitted to the backend,
-encrypted at rest, masked in every later response, and never stored in browser
-storage. Users manage them from the **AI Providers** workspace and attach a
-credential to each model variant.
+JWT access tokens stay only in React/module memory. A rotating opaque refresh
+token is stored in an HttpOnly, SameSite cookie and is never readable by
+JavaScript; the API client performs one shared refresh and retries a protected
+request once after an expired access token. Provider keys are submitted to the
+backend, encrypted at rest, masked in every later response, and never stored in
+browser storage. Users manage them from the **AI Providers** workspace and
+attach a credential to each model variant.

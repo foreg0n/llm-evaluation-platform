@@ -1,5 +1,7 @@
 # LLM Evaluation Platform
 
+[![CI](https://github.com/foreg0n/llm-evaluation-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/foreg0n/llm-evaluation-platform/actions/workflows/ci.yml)
+
 A full-stack evaluation platform for comparing real language models across
 multiple AI providers. It combines an asynchronous CLI, a FastAPI and
 PostgreSQL backend, and a dark analytics frontend for everyday experiment
@@ -40,7 +42,13 @@ complete workflow.
 - Versioned CRUD API for projects, datasets, dataset items, and model variants
 - API-managed evaluation runs persisted in PostgreSQL
 - Fast `202 Accepted` scheduling, progress polling, and run cancellation
-- Argon2 password hashing and expiring JWT access tokens
+- Argon2 password hashing and short-lived JWT access tokens
+- Rotating opaque refresh sessions stored as SHA-256 hashes
+- HttpOnly SameSite refresh cookies, logout, logout-all, and reuse detection
+- Configurable in-memory or Redis-backed authentication rate limiting
+- Required email verification for new accounts with one-time hashed tokens
+- Password recovery with expiring links and all-session revocation
+- SMTP delivery for deployments and console delivery for local development
 - Per-user project ownership and data isolation across every protected endpoint
 - Responsive React frontend with login, registration, and session handling
 - Live overview dashboard backed by the projects and evaluation-runs APIs
@@ -65,6 +73,9 @@ complete workflow.
 - Optional OpenTelemetry tracing across FastAPI and Celery through W3C context
 - Local Grafana Tempo storage and a provisioned trace-exploration datasource
 - Optional privacy-safe Sentry error reporting for FastAPI and Celery failures
+- Read-only GitHub Actions CI for backend, frontend, migrations, Compose, and
+  production container builds
+- Weekly Dependabot updates for GitHub Actions, Python, npm, and Docker
 - Production-oriented Docker images and one-command full-stack Compose startup
 
 ## Requirements
@@ -157,7 +168,10 @@ DATABASE_URL=postgresql+asyncpg://postgres:change-me@localhost:5432/llm_evaluati
 DATABASE_ECHO=false
 AUTH_SECRET_KEY=replace-with-a-random-secret
 CREDENTIAL_ENCRYPTION_KEY=replace-with-a-fernet-key
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=30
+REFRESH_COOKIE_SECURE=false
+AUTH_RATE_LIMIT_BACKEND=memory
 ```
 
 Generate a strong signing secret instead of typing one manually:
@@ -194,6 +208,13 @@ your new user ID; they are never exposed automatically.
 Migration `20260824_0004` adds encrypted per-user provider credentials and the
 optional credential link on model variants.
 
+Migration `20260824_0005` adds hashed, rotating refresh sessions and their
+revocation chain. No plaintext refresh token is stored in PostgreSQL.
+
+Migration `20260825_0006` marks existing users as verified, adds
+`email_verified_at`, and creates hashed one-time tokens for email verification
+and password recovery. New accounts remain unverified until their link is used.
+
 Start the API from the repository root:
 
 ```bash
@@ -216,6 +237,8 @@ Create `.env` if it does not exist, then set at least these values:
 POSTGRES_PASSWORD=choose-a-long-url-safe-password
 AUTH_SECRET_KEY=replace-with-64-random-hex-characters
 CREDENTIAL_ENCRYPTION_KEY=replace-with-a-generated-fernet-key
+# Keep false only for the localhost HTTP stack; use true behind HTTPS.
+REFRESH_COOKIE_SECURE=false
 # Optional CLI/server fallback:
 GROQ_API_KEY=your-secret-groq-key
 ```
@@ -512,17 +535,20 @@ Open the local URL printed by the development server, normally
 `http://localhost:3000`. The frontend uses `NEXT_PUBLIC_API_URL` from
 `frontend/.env.local`; it defaults to `http://127.0.0.1:8000`.
 
-The access token is kept in `sessionStorage`, so closing the tab ends the local
-browser session. This limits persistence but does not replace production-grade
-XSS protections. A future production deployment should use HTTPS and consider
-secure, HttpOnly cookies.
+The access token stays only in JavaScript module/React memory. The browser
+stores an opaque rotating refresh token in an HttpOnly SameSite cookie, so
+JavaScript cannot read it. The API client shares one in-flight refresh across
+concurrent requests and retries a protected request once after access-token
+expiration. Set `REFRESH_COOKIE_SECURE=true` when the application is served
+through production HTTPS; keep it `false` only for localhost HTTP.
 
 If the frontend runs on a different origin, add it to the comma-separated
 `CORS_ORIGINS` value in the root `.env` file and restart FastAPI.
 
 ## Authentication
 
-Register once, then exchange your credentials for a short-lived bearer token:
+Register once, verify the email address, then exchange the credentials for a
+short-lived bearer token:
 
 ```powershell
 $user = Invoke-RestMethod `
@@ -530,6 +556,9 @@ $user = Invoke-RestMethod `
   -Uri http://127.0.0.1:8000/api/v1/auth/register `
   -ContentType "application/json" `
   -Body '{"email":"you@example.com","password":"choose-a-long-password"}'
+
+# Open the verification URL delivered by SMTP. With EMAIL_BACKEND=console,
+# copy it from the API terminal or run: docker compose logs api
 
 $login = Invoke-RestMethod `
   -Method Post `
@@ -545,13 +574,43 @@ The available auth endpoints are:
 - `POST /api/v1/auth/register` for JSON registration
 - `POST /api/v1/auth/login` for JSON login
 - `POST /api/v1/auth/token` for the OAuth2 password form used by Swagger UI
+- `POST /api/v1/auth/refresh` for refresh-token rotation and a new access token
+- `POST /api/v1/auth/logout` to revoke the current refresh-session family
+- `POST /api/v1/auth/logout-all` to revoke every refresh session for the user
+- `POST /api/v1/auth/email-verification/request` to resend a verification link
+- `POST /api/v1/auth/email-verification/confirm` to consume that one-time link
+- `POST /api/v1/auth/password-reset/request` to request recovery instructions
+- `POST /api/v1/auth/password-reset/confirm` to set a new password and revoke
+  all existing refresh sessions
 - `GET /api/v1/auth/me` for the current account
 
-The health endpoint and auth endpoints are public. Every project, dataset,
-item, variant, run, and result endpoint requires `Authorization: Bearer ...`.
-Users see only their own projects and all nested resources inherit that
-ownership. Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES`; sign in again to
-obtain a new one.
+The health endpoint and registration/login/refresh/logout endpoints are public;
+`logout-all`, `me`, and all project, dataset, item, variant, run, result, and
+provider-credential endpoints require `Authorization: Bearer ...`. Users see
+only their own projects and all nested resources inherit that ownership.
+
+Login failures are rate-limited by a hash of the client/account identifier.
+Local development defaults to an in-memory limiter. Full-stack Compose uses
+Redis so limits are shared and survive API process restarts. A successful login
+clears its failure bucket; blocked requests return `429` and `Retry-After`.
+
+Each refresh token is random and opaque. PostgreSQL stores only its SHA-256
+hash. Rotation revokes the old row and links it to its replacement. Replaying a
+rotated token revokes the entire session family. Logout revokes refresh access;
+an already issued access token remains valid only until its short expiration.
+
+Verification and recovery tokens are random, single-use, and expire after 24
+hours and 30 minutes respectively by default. Only SHA-256 hashes are stored in
+PostgreSQL. Request endpoints always return the same `202 Accepted` response for
+known and unknown addresses, and they share the authentication rate limiter.
+Account-action links keep the token in the URL fragment so it is not sent to the
+frontend server or included in ordinary HTTP referrers.
+
+For local development, `EMAIL_BACKEND=console` writes the link to API logs. A
+public deployment must use `EMAIL_BACKEND=smtp` and configure `SMTP_HOST`,
+`SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_STARTTLS`,
+`EMAIL_FROM_ADDRESS`, and the public HTTPS `FRONTEND_PUBLIC_URL`. The frontend
+contains verification, resend, forgot-password, and new-password flows.
 
 ## CRUD API
 
@@ -820,6 +879,35 @@ The terminal displays an aggregate summary. The complete report is written to
 `artifacts/results.json` and includes the answer, quality metrics, latency,
 token usage, estimated cost, retry count, and provider errors for every item.
 
+## Continuous Integration
+
+The `.github/workflows/ci.yml` workflow runs on pushes to `main`, pull requests,
+and manual dispatches. It grants the generated `GITHUB_TOKEN` only
+`contents: read` and never loads real provider, SMTP, database, or deployment
+secrets.
+
+The quality gate contains four jobs:
+
+1. **Backend tests and migrations** — installs Python 3.12 dependencies from
+   `pyproject.toml`, compiles the packages, runs the complete network-free
+   pytest suite, and renders the full Alembic SQL chain.
+2. **Frontend lint, build, and tests** — installs the exact npm lockfile on
+   Node.js 22, runs ESLint, builds the production Vinext bundle, and executes
+   server-render/security tests.
+3. **Compose validation** — parses the complete production configuration with
+   non-secret CI placeholder values.
+4. **Container builds** — runs only after the first three jobs pass and builds
+   both non-root production images without pushing them to a registry.
+
+Concurrent runs for the same branch are cancelled when a newer commit arrives.
+Dependency caches contain package-manager downloads, not installed virtual
+environments or `node_modules`. Dependabot checks GitHub Actions, pip, npm, and
+both Dockerfiles every week.
+
+The workflow intentionally uses `pull_request`, not `pull_request_target`, and
+has no publish/deploy credentials. A later deployment workflow can consume this
+CI result through a protected environment and explicit approval.
+
 ## Running Tests
 
 ```bash
@@ -828,9 +916,10 @@ pytest
 
 Tests inject mocked completion functions into `LiteLLMProvider` and the run API.
 Backend integration tests use a temporary SQLite database and cover registration,
-login, expired tokens, encrypted provider credentials, protected routes, and
-cross-user isolation. They do not read your real API keys, send provider
-requests, or modify PostgreSQL.
+email verification, password recovery, one-time/expired account tokens, login,
+refresh rotation/replay, logout, auth rate limiting, encrypted provider
+credentials, protected routes, and cross-user isolation. They do not read real
+API keys, connect to SMTP, Redis, or provider APIs, or modify PostgreSQL.
 
 ## Dataset Format
 
@@ -982,8 +1071,13 @@ Users can manage encrypted BYOK credentials for multiple providers from the UI,
 test them explicitly, and bind different credentials to individual model
 variants. The worker resolves those credentials at execution time without
 placing plaintext secrets in Celery messages or evaluation records.
+Authentication now uses memory-only access tokens plus rotating HttpOnly
+refresh sessions, supports current/all-session revocation, detects refresh-token
+replay, and rate-limits credential attempts through Redis in Docker Compose.
+New accounts require email verification, and the password-recovery flow uses
+short-lived one-time tokens, generic request responses, and all-session
+revocation after a successful reset.
 
-Refresh tokens, password recovery, email verification, production Redis
-security, model-catalog discovery, large-run pagination, notification delivery,
-automated error/alert notification delivery, CI/CD, and public cloud deployment
-remain future stages.
+Production Redis security, model-catalog discovery, large-run pagination,
+durable email/notification delivery, automated error/alert notification
+delivery, release publishing, and public cloud deployment remain future stages.

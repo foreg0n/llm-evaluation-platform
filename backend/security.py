@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import uuid
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -11,6 +13,9 @@ from backend.config import Settings
 
 JWT_ALGORITHM = "HS256"
 password_hash = PasswordHash.recommended()
+REFRESH_TOKEN_BYTES = 48
+ACCOUNT_ACTION_TOKEN_BYTES = 32
+DUMMY_PASSWORD_HASH = password_hash.hash("evalflow-dummy-password")
 
 
 def hash_password(password: str) -> str:
@@ -22,6 +27,22 @@ def verify_password(password: str, encoded_hash: str) -> bool:
         return password_hash.verify(password, encoded_hash)
     except Exception:
         return False
+
+
+def create_refresh_token() -> str:
+    return secrets.token_urlsafe(REFRESH_TOKEN_BYTES)
+
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_account_action_token() -> str:
+    return secrets.token_urlsafe(ACCOUNT_ACTION_TOKEN_BYTES)
+
+
+def hash_account_action_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def create_access_token(

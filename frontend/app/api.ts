@@ -1,4 +1,9 @@
-export type User = { id: string; email: string; is_active: boolean };
+export type User = {
+  id: string;
+  email: string;
+  is_active: boolean;
+  email_verified_at: string | null;
+};
 
 export type Project = {
   id: string;
@@ -137,6 +142,22 @@ const API_BASE = (
   process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000"
 ).replace(/\/$/, "");
 
+let activeAccessToken: string | null = null;
+let accessTokenListener: ((token: string | null) => void) | null = null;
+let refreshPromise: Promise<string | null> | null = null;
+
+const NO_AUTO_REFRESH_PATHS = new Set([
+  "/api/v1/auth/login",
+  "/api/v1/auth/logout",
+  "/api/v1/auth/refresh",
+  "/api/v1/auth/register",
+  "/api/v1/auth/token",
+  "/api/v1/auth/email-verification/request",
+  "/api/v1/auth/email-verification/confirm",
+  "/api/v1/auth/password-reset/request",
+  "/api/v1/auth/password-reset/confirm",
+]);
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -146,36 +167,97 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiRequest<T>(
+export function setApiAccessToken(token: string | null) {
+  activeAccessToken = token;
+  accessTokenListener?.(token);
+}
+
+export function subscribeToApiAccessToken(
+  listener: (token: string | null) => void,
+) {
+  accessTokenListener = listener;
+  return () => {
+    if (accessTokenListener === listener) accessTokenListener = null;
+  };
+}
+
+async function errorFromResponse(response: Response): Promise<ApiError> {
+  const body = await response.json().catch(() => null);
+  const detail = body?.detail;
+  const validationMessage = Array.isArray(detail)
+    ? detail
+        .map((issue) => issue?.msg)
+        .filter((message): message is string => typeof message === "string")
+        .join("; ")
+    : "";
+  const message =
+    typeof detail === "string"
+      ? detail
+      : validationMessage
+        ? validationMessage
+        : response.status === 401
+          ? "Your session has expired. Please sign in again."
+          : "The request could not be completed.";
+  return new ApiError(message, response.status);
+}
+
+export async function refreshApiAccessToken(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    const response = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!response.ok) {
+      setApiAccessToken(null);
+      return null;
+    }
+    const payload = (await response.json()) as TokenResponse;
+    setApiAccessToken(payload.access_token);
+    return payload.access_token;
+  })().finally(() => {
+    refreshPromise = null;
+  });
+  return refreshPromise;
+}
+
+async function executeApiRequest<T>(
   path: string,
-  options: RequestInit = {},
-  token?: string,
+  options: RequestInit,
+  fallbackToken: string | undefined,
+  allowRefresh: boolean,
 ): Promise<T> {
+  const token = activeAccessToken ?? fallbackToken;
   const headers = new Headers(options.headers);
   if (options.body && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    const detail = body?.detail;
-    const validationMessage = Array.isArray(detail)
-      ? detail
-          .map((issue) => issue?.msg)
-          .filter((message): message is string => typeof message === "string")
-          .join("; ")
-      : "";
-    const message =
-      typeof detail === "string"
-        ? detail
-        : validationMessage
-          ? validationMessage
-        : response.status === 401
-          ? "Your session has expired. Please sign in again."
-          : "The request could not be completed.";
-    throw new ApiError(message, response.status);
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+    credentials: "include",
+  });
+  if (
+    response.status === 401 &&
+    allowRefresh &&
+    token &&
+    !NO_AUTO_REFRESH_PATHS.has(path)
+  ) {
+    const refreshedToken = await refreshApiAccessToken();
+    if (refreshedToken) {
+      return executeApiRequest<T>(path, options, refreshedToken, false);
+    }
   }
+  if (!response.ok) throw await errorFromResponse(response);
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+export async function apiRequest<T>(
+  path: string,
+  options: RequestInit = {},
+  token?: string,
+): Promise<T> {
+  return executeApiRequest<T>(path, options, token, true);
 }

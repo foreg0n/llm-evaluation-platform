@@ -52,6 +52,7 @@ def test_local_frontend_origin_is_allowed_by_cors() -> None:
     assert response.headers["access-control-allow-origin"] == (
         "http://localhost:3000"
     )
+    assert response.headers["access-control-allow-credentials"] == "true"
 
 
 def test_request_id_is_echoed_and_attached_to_completion_log(caplog) -> None:

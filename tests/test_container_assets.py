@@ -78,6 +78,15 @@ def test_compose_keeps_secrets_external_and_binds_public_ports_locally() -> None
     assert "@postgres:5432/" in backend_environment["DATABASE_URL"]
     assert "redis://redis:6379/0" == backend_environment["CELERY_BROKER_URL"]
     assert backend_environment["CELERY_METRICS_ENABLED"] == "true"
+    assert backend_environment["AUTH_RATE_LIMIT_BACKEND"] == "redis"
+    assert backend_environment["REFRESH_TOKEN_EXPIRE_DAYS"] == (
+        "${REFRESH_TOKEN_EXPIRE_DAYS:-30}"
+    )
+    assert backend_environment["REQUIRE_EMAIL_VERIFICATION"] == (
+        "${REQUIRE_EMAIL_VERIFICATION:-true}"
+    )
+    assert backend_environment["EMAIL_BACKEND"] == "${EMAIL_BACKEND:-console}"
+    assert backend_environment["SMTP_PASSWORD"] == "${SMTP_PASSWORD:-}"
     assert services["api"]["ports"][0].startswith("127.0.0.1:")
     assert services["worker"]["ports"][0].startswith("127.0.0.1:")
     assert services["frontend"]["ports"][0].startswith("127.0.0.1:")
