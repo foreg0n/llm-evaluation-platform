@@ -31,11 +31,18 @@ def test_ci_covers_backend_frontend_configuration_and_images() -> None:
     workflow = load_yaml(ROOT / ".github" / "workflows" / "ci.yml")
     jobs = workflow["jobs"]
 
-    assert set(jobs) == {"backend", "frontend", "configuration", "containers"}
+    assert set(jobs) == {
+        "backend",
+        "frontend",
+        "configuration",
+        "backup-restore",
+        "containers",
+    }
     assert jobs["containers"]["needs"] == [
         "backend",
         "frontend",
         "configuration",
+        "backup-restore",
     ]
     all_runs = "\n".join(
         str(step.get("run", ""))
@@ -49,9 +56,14 @@ def test_ci_covers_backend_frontend_configuration_and_images() -> None:
     assert "npm test" in all_runs
     assert "docker compose config --quiet" in all_runs
     assert "compose.production.yaml config --quiet" in all_runs
+    assert "compose.backup-drill.yaml config --quiet" in all_runs
     assert "caddy validate --config /etc/caddy/Caddyfile" in all_runs
+    assert "compose.backup-drill.yaml" in all_runs
+    assert "run --rm --no-deps backup" in all_runs
+    assert "run --rm --no-deps restore-drill" in all_runs
     assert "docker build --tag evalflow-api:ci ." in all_runs
     assert "--tag evalflow-frontend:ci" in all_runs
+    assert "docker build --tag evalflow-backup:ci" in all_runs
 
 
 def test_ci_uses_current_action_majors_and_locked_dependencies() -> None:
@@ -70,7 +82,7 @@ def test_dependabot_tracks_every_dependency_ecosystem() -> None:
     config = load_yaml(ROOT / ".github" / "dependabot.yml")
     ecosystems = [entry["package-ecosystem"] for entry in config["updates"]]
 
-    assert ecosystems.count("docker") == 2
+    assert ecosystems.count("docker") == 3
     assert set(ecosystems) == {"github-actions", "pip", "npm", "docker"}
     assert all(
         entry["schedule"]["interval"] == "weekly"

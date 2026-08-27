@@ -20,8 +20,11 @@ def test_production_compose_exposes_only_the_https_gateway() -> None:
         "migrate",
         "api",
         "worker",
+        "backup",
         "frontend",
         "caddy",
+        "restore-postgres",
+        "restore-drill",
     }
     assert services["caddy"]["ports"] == ["80:80", "443:443", "443:443/udp"]
     assert all(
@@ -33,6 +36,12 @@ def test_production_compose_exposes_only_the_https_gateway() -> None:
     assert set(services["postgres"]["networks"]) == {"backend"}
     assert set(services["redis"]["networks"]) == {"backend"}
     assert set(services["worker"]["networks"]) == {"backend", "egress"}
+    assert set(services["backup"]["networks"]) == {"backend", "egress"}
+    assert services["backup"]["depends_on"]["migrate"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert services["restore-postgres"]["profiles"] == ["restore"]
+    assert services["restore-drill"]["profiles"] == ["restore"]
 
 
 def test_production_compose_requires_secrets_and_authenticates_redis() -> None:
@@ -88,7 +97,12 @@ def test_release_runs_ci_before_publishing_versioned_ghcr_images() -> None:
     }
     assert "ghcr.io/${{ github.repository }}-" in workflow_text
     assert "type=semver,pattern={{version}}" in workflow_text
-    assert "Release tag must look like v0.31.0" in workflow_text
+    assert "Release tag must look like v0.32.0" in workflow_text
+    components = {
+        entry["component"]
+        for entry in jobs["publish"]["strategy"]["matrix"]["include"]
+    }
+    assert components == {"api", "frontend", "backup"}
     assert "push: true" in workflow_text
     assert "provenance: mode=max" in workflow_text
     assert "sbom: true" in workflow_text
@@ -113,6 +127,9 @@ def test_production_environment_template_contains_placeholders_only() -> None:
     assert "APP_DOMAIN=evalflow.example.com" in template
     assert "EVALFLOW_API_IMAGE=ghcr.io/foreg0n/" in template
     assert "EVALFLOW_FRONTEND_IMAGE=ghcr.io/foreg0n/" in template
+    assert "EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/" in template
+    assert "RESTIC_REPOSITORY=s3:https://" in template
+    assert "RESTIC_PASSWORD=replace-with-" in template
     assert template.count("replace-with-") >= 6
     assert "CREDENTIAL_ENCRYPTION_KEY=" in template
     assert "GROQ_API_KEY=\n" in template

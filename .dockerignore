@@ -12,6 +12,7 @@
 *.egg-info
 artifacts/*.json
 frontend
+deploy
 observability
 tests
 compose*.yaml

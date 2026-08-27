@@ -166,6 +166,51 @@ services:
       start_period: 15s
     stop_grace_period: 60s
 
+  backup:
+    image: ${EVALFLOW_BACKUP_IMAGE:?Set EVALFLOW_BACKUP_IMAGE in .env.production}
+    restart: unless-stopped
+    init: true
+    hostname: evalflow-production-backup
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-llm_evaluation}
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:?Set RESTIC_REPOSITORY in .env.production}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:?Set RESTIC_PASSWORD in .env.production}
+      RESTIC_HOST: ${RESTIC_HOST:-evalflow-production}
+      RESTIC_TAG: evalflow-postgres
+      RESTIC_CACHE_DIR: /cache
+      BACKUP_STATE_DIR: /state
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETRY_SECONDS: ${BACKUP_RETRY_SECONDS:-300}
+      BACKUP_MAX_AGE_SECONDS: ${BACKUP_MAX_AGE_SECONDS:-90000}
+      BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-true}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-5}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
+      BACKUP_PRUNE: ${BACKUP_PRUNE:-true}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
+    volumes:
+      - backup_cache:/cache
+      - backup_state:/state
+    networks:
+      - backend
+      - egress
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "health"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
+    stop_grace_period: 30s
+
   frontend:
     image: ${EVALFLOW_FRONTEND_IMAGE:?Set EVALFLOW_FRONTEND_IMAGE in .env.production}
     restart: unless-stopped
@@ -219,6 +264,55 @@ services:
       retries: 3
     stop_grace_period: 30s
 
+  restore-postgres:
+    profiles: ["restore"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: llm_evaluation_restore
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  restore-drill:
+    profiles: ["restore"]
+    image: ${EVALFLOW_BACKUP_IMAGE:?Set EVALFLOW_BACKUP_IMAGE in .env.production}
+    environment:
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:?Set RESTIC_REPOSITORY in .env.production}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:?Set RESTIC_PASSWORD in .env.production}
+      RESTIC_HOST: ${RESTIC_HOST:-evalflow-production}
+      RESTIC_TAG: evalflow-postgres
+      RESTIC_CACHE_DIR: /cache
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
+      TARGET_PGHOST: restore-postgres
+      TARGET_PGDATABASE: llm_evaluation_restore
+      TARGET_PGUSER: ${POSTGRES_USER:-postgres}
+      TARGET_PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      RESTORE_MIN_PUBLIC_TABLES: ${RESTORE_MIN_PUBLIC_TABLES:-8}
+    command: ["restore"]
+    volumes:
+      - backup_cache:/cache
+    networks:
+      - backend
+      - egress
+    depends_on:
+      restore-postgres:
+        condition: service_healthy
+    restart: "no"
+
 networks:
   edge:
   egress:
@@ -230,3 +324,5 @@ volumes:
   redis_data:
   caddy_data:
   caddy_config:
+  backup_cache:
+  backup_state:

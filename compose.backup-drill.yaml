@@ -1,0 +1,103 @@
+name: evalflow-backup-drill
+
+x-source-database: &source-database
+  PGHOST: source-postgres
+  PGDATABASE: llm_evaluation
+  PGUSER: postgres
+  PGPASSWORD: drill-postgres-password
+
+x-restic: &restic
+  RESTIC_REPOSITORY: /repository
+  RESTIC_PASSWORD: drill-restic-encryption-password
+  RESTIC_HOST: evalflow-ci-drill
+  RESTIC_TAG: evalflow-postgres
+  RESTIC_CACHE_DIR: /cache
+
+services:
+  source-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: llm_evaluation
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: drill-postgres-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d llm_evaluation"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://postgres:drill-postgres-password@source-postgres:5432/llm_evaluation
+      AUTH_SECRET_KEY: drill-auth-secret-key-with-at-least-32-characters
+      CREDENTIAL_ENCRYPTION_KEY: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      source-postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backup:
+    build:
+      context: ./deploy/backup
+      dockerfile: Dockerfile
+    environment:
+      <<: [*source-database, *restic]
+      BACKUP_KEEP_DAILY: 2
+      BACKUP_KEEP_WEEKLY: 1
+      BACKUP_KEEP_MONTHLY: 1
+      BACKUP_PRUNE: "true"
+    command: ["backup"]
+    volumes:
+      - repository:/repository
+      - backup_cache:/cache
+      - backup_state:/state
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  restore-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: llm_evaluation_restore
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: drill-restore-password
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d llm_evaluation_restore"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  restore-drill:
+    build:
+      context: ./deploy/backup
+      dockerfile: Dockerfile
+    environment:
+      <<: *restic
+      TARGET_PGHOST: restore-postgres
+      TARGET_PGDATABASE: llm_evaluation_restore
+      TARGET_PGUSER: postgres
+      TARGET_PGPASSWORD: drill-restore-password
+      RESTORE_MIN_PUBLIC_TABLES: 8
+    command: ["restore"]
+    volumes:
+      - repository:/repository
+      - backup_cache:/cache
+    depends_on:
+      backup:
+        condition: service_completed_successfully
+      restore-postgres:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  repository:
+  backup_cache:
+  backup_state:

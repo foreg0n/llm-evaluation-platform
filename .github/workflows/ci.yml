@@ -93,11 +93,16 @@ jobs:
           ACME_EMAIL: ops@example.com
           EVALFLOW_API_IMAGE: ghcr.io/example/evalflow-api:ci
           EVALFLOW_FRONTEND_IMAGE: ghcr.io/example/evalflow-frontend:ci
+          EVALFLOW_BACKUP_IMAGE: ghcr.io/example/evalflow-backup:ci
           POSTGRES_PASSWORD: ci-postgres-password
           REDIS_PASSWORD: ci-redis-password
+          RESTIC_REPOSITORY: /repository
+          RESTIC_PASSWORD: ci-restic-password
           AUTH_SECRET_KEY: ci-auth-secret-key-with-at-least-32-characters
           CREDENTIAL_ENCRYPTION_KEY: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
         run: docker compose -f compose.production.yaml config --quiet
+      - name: Validate backup drill Compose file
+        run: docker compose -f compose.backup-drill.yaml config --quiet
       - name: Validate Caddy HTTPS configuration
         run: >-
           docker run --rm
@@ -107,11 +112,33 @@ jobs:
           caddy:2.10.2-alpine
           caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
+  backup-restore:
+    name: PostgreSQL backup and restore drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend, configuration]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Create encrypted backup and verify isolated restore
+        run: |
+          docker compose -f compose.backup-drill.yaml build migrate backup restore-drill
+          docker compose -f compose.backup-drill.yaml up --detach --wait source-postgres restore-postgres
+          docker compose -f compose.backup-drill.yaml run --rm --no-deps migrate
+          docker compose -f compose.backup-drill.yaml run --rm --no-deps backup
+          docker compose -f compose.backup-drill.yaml run --rm --no-deps restore-drill
+      - name: Inspect drill containers
+        if: always()
+        run: docker compose -f compose.backup-drill.yaml ps -a
+      - name: Remove drill containers and volumes
+        if: always()
+        run: docker compose -f compose.backup-drill.yaml down --volumes --remove-orphans
+
   containers:
     name: Build production containers
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [backend, frontend, configuration]
+    needs: [backend, frontend, configuration, backup-restore]
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -123,5 +150,9 @@ jobs:
           --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000
           --tag evalflow-frontend:ci
           ./frontend
+      - name: Build backup image
+        run: docker build --tag evalflow-backup:ci ./deploy/backup
       - name: Inspect built images
-        run: docker image inspect evalflow-api:ci evalflow-frontend:ci > /dev/null
+        run: >-
+          docker image inspect
+          evalflow-api:ci evalflow-frontend:ci evalflow-backup:ci > /dev/null

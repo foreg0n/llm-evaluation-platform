@@ -79,8 +79,11 @@ complete workflow.
 - Production-oriented Docker images and one-command full-stack Compose startup
 - Separate hardened production topology with automatic HTTPS through Caddy
 - Private database/queue networks and password-authenticated production Redis
-- Tag-driven multi-architecture API/frontend releases to GitHub Container Registry
+- Tag-driven multi-architecture API/frontend/backup releases to GitHub Container Registry
 - Build provenance and software bill of materials for published container images
+- Encrypted off-site PostgreSQL backups with daily/weekly/monthly retention
+- Backup freshness health checks and automated retry scheduling
+- Isolated end-to-end restore drills that verify schema and table integrity
 
 ## Requirements
 
@@ -890,7 +893,7 @@ manual dispatches, and as the reusable quality gate for releases. It grants the 
 `contents: read` and never loads real provider, SMTP, database, or deployment
 secrets.
 
-The quality gate contains four jobs:
+The quality gate contains five jobs:
 
 1. **Backend tests and migrations** — installs Python 3.12 dependencies from
    `pyproject.toml`, compiles the packages, runs the complete network-free
@@ -898,15 +901,18 @@ The quality gate contains four jobs:
 2. **Frontend lint, build, and tests** — installs the exact npm lockfile on
    Node.js 22, runs ESLint, builds the production Vinext bundle, and executes
    server-render/security tests.
-3. **Compose validation** — parses both the local full-stack and hardened
-   production configurations with non-secret CI placeholder values.
-4. **Container builds** — runs only after the first three jobs pass and builds
-   both non-root production images without pushing them to a registry.
+3. **Compose validation** — parses the local full-stack, hardened production,
+   and backup-drill configurations with non-secret CI placeholder values.
+4. **Backup/restore drill** — migrates a fresh PostgreSQL source, creates an
+   encrypted restic snapshot, restores it into an isolated target, and verifies
+   the schema plus public tables.
+5. **Container builds** — runs only after the first four jobs pass and builds
+   all three non-root production images without pushing them to a registry.
 
 Concurrent runs for the same branch are cancelled when a newer commit arrives.
 Dependency caches contain package-manager downloads, not installed virtual
 environments or `node_modules`. Dependabot checks GitHub Actions, pip, npm, and
-both Dockerfiles every week.
+all three Dockerfiles every week.
 
 The workflow intentionally uses `pull_request`, not `pull_request_target`, and
 has no publish/deploy credentials. The separate release workflow receives only
@@ -915,9 +921,9 @@ workflow succeeds.
 
 ## Production Releases and HTTPS Deployment
 
-Pushing a semantic version tag such as `v0.31.0` starts
+Pushing a semantic version tag such as `v0.32.0` starts
 `.github/workflows/release.yml`. It reruns the complete CI quality gate, then
-builds Linux AMD64 and ARM64 API/frontend images and publishes exact-version,
+builds Linux AMD64 and ARM64 API/frontend/backup images and publishes exact-version,
 minor-version, and stable `latest` tags to GitHub Container Registry. Published
 images include OCI source/revision labels, build provenance, and an SBOM. No
 server credentials are stored in GitHub and the workflow does not deploy to a
@@ -938,6 +944,60 @@ point the domain DNS record at the server, and follow the validation, release,
 upgrade, and rollback commands in [DEPLOYMENT.md](DEPLOYMENT.md). The production
 environment file is explicitly ignored by Git; only its placeholder template is
 tracked.
+
+### Encrypted Backups and Restore Drills
+
+The production stack includes a dedicated non-root backup image combining the
+PostgreSQL 17 client with restic 0.19.1. On startup and every 24 hours by
+default, it creates a custom-format `pg_dump`, writes the dump into the
+encrypted restic repository, applies daily/weekly/monthly retention, and
+atomically records the last successful backup time. Failed attempts retry after
+five minutes without stopping the API, worker, or frontend.
+
+Configure an off-site repository in `.env.production`:
+
+```dotenv
+EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/llm-evaluation-platform-backup:0.32.0
+RESTIC_REPOSITORY=s3:https://s3.example.com/evalflow-production/postgres
+RESTIC_PASSWORD=replace-with-an-independent-encryption-password
+AWS_ACCESS_KEY_ID=replace-with-object-storage-access-key
+AWS_SECRET_ACCESS_KEY=replace-with-object-storage-secret-key
+AWS_DEFAULT_REGION=auto
+BACKUP_KEEP_DAILY=7
+BACKUP_KEEP_WEEKLY=5
+BACKUP_KEEP_MONTHLY=12
+```
+
+`RESTIC_PASSWORD` encrypts the repository and must be stored separately from
+the bucket. Back up `CREDENTIAL_ENCRYPTION_KEY` in a secret manager as well:
+the database contains encrypted BYOK values, but the database backup does not
+contain the Fernet key required to decrypt them.
+
+Check freshness, trigger an on-demand backup, and list snapshots:
+
+```bash
+docker compose --env-file .env.production -f compose.production.yaml exec backup health
+docker compose --env-file .env.production -f compose.production.yaml run --rm backup backup
+docker compose --env-file .env.production -f compose.production.yaml run --rm backup restic snapshots --tag evalflow-postgres
+```
+
+The restore profile never writes into the live database. It restores the latest
+snapshot into a temporary PostgreSQL container, runs `pg_restore
+--exit-on-error`, reads the Alembic version, and enforces a minimum public-table
+count:
+
+```bash
+docker compose --env-file .env.production -f compose.production.yaml \
+  --profile restore up --abort-on-container-exit \
+  --exit-code-from restore-drill restore-drill
+docker compose --env-file .env.production -f compose.production.yaml \
+  --profile restore rm -f restore-drill restore-postgres
+```
+
+CI performs the same full backup-and-restore sequence against fresh source and
+target databases using `compose.backup-drill.yaml`. This verifies that a backup
+is actually restorable rather than merely checking that an archive file exists.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for retention, recovery, and cleanup details.
 
 ## Running Tests
 
@@ -1025,6 +1085,9 @@ llm-evaluation-platform/
 │   └── main.py
 ├── Dockerfile
 ├── deploy/
+│   ├── backup/
+│   │   ├── scripts/
+│   │   └── Dockerfile
 │   └── Caddyfile
 ├── evals/
 │   ├── datasets/
@@ -1064,6 +1127,7 @@ llm-evaluation-platform/
 ├── .env.example
 ├── .env.production.example
 ├── .dockerignore
+├── compose.backup-drill.yaml
 ├── compose.production.yaml
 ├── compose.yaml
 ├── compose.observability.yaml
@@ -1105,8 +1169,12 @@ automatic migrations, localhost-only published ports, and health-gated startup.
 The separate production topology adds Caddy-managed HTTPS, same-origin API
 routing, security headers, private service networks, authenticated Redis, and
 required secret interpolation. Semantic Git tags run the complete reusable CI
-gate before multi-architecture API and frontend images with provenance and an
-SBOM are published to GHCR.
+gate before multi-architecture API, frontend, and backup images with provenance and an
+SBOM are published to GHCR. A scheduled backup service now produces encrypted
+off-site PostgreSQL snapshots with bounded retention and freshness health
+checks. The CI and production restore profiles prove the latest snapshot can be
+loaded into an isolated database with a valid Alembic version and expected
+schema size.
 Users can manage encrypted BYOK credentials for multiple providers from the UI,
 test them explicitly, and bind different credentials to individual model
 variants. The worker resolves those credentials at execution time without
@@ -1120,5 +1188,5 @@ revocation after a successful reset.
 
 Model-catalog discovery, large-run pagination, durable email/notification
 delivery, automated error/alert notification delivery, infrastructure
-provisioning, backups, and the first public cloud deployment remain future
-stages.
+provisioning, object-storage immutability policy, and the first public cloud
+deployment remain future stages.
