@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "LLM Evaluation Platform"
-    app_version: str = "0.33.0"
+    app_version: str = "0.34.0"
     environment: str = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
@@ -120,6 +120,18 @@ class Settings(BaseSettings):
     credential_encryption_key: SecretStr = Field(
         default=DEVELOPMENT_CREDENTIAL_ENCRYPTION_KEY,
         validation_alias="CREDENTIAL_ENCRYPTION_KEY",
+    )
+    model_catalog_timeout_seconds: float = Field(
+        default=10,
+        gt=0,
+        le=30,
+        validation_alias="MODEL_CATALOG_TIMEOUT_SECONDS",
+    )
+    model_catalog_cache_ttl_seconds: int = Field(
+        default=300,
+        ge=0,
+        le=3600,
+        validation_alias="MODEL_CATALOG_CACHE_TTL_SECONDS",
     )
     access_token_expire_minutes: int = Field(
         default=15,

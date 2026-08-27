@@ -76,6 +76,16 @@ export type ProviderCredential = {
   updated_at: string;
 };
 
+export type ProviderModelCatalog = {
+  credential_id: string;
+  provider: string;
+  models: Array<{ id: string; label: string }>;
+  source: "provider" | "litellm" | "manual";
+  cached: boolean;
+  refreshed_at: string;
+  warning: string | null;
+};
+
 export type EvaluationRun = {
   id: string;
   project_id: string;

@@ -27,6 +27,12 @@ from backend.schemas import (
     ProviderCredentialTestRead,
     ProviderCredentialTestRequest,
     ProviderCredentialUpdate,
+    ProviderModelCatalogRead,
+    ProviderModelEntry,
+)
+from backend.services.model_catalog import (
+    ProviderModelCatalogProtocol,
+    get_provider_model_catalog,
 )
 from backend.services.provider_credentials import (
     ProviderCredentialTesterProtocol,
@@ -39,6 +45,10 @@ CipherDependency = Annotated[CredentialCipher, Depends(get_credential_cipher)]
 TesterDependency = Annotated[
     ProviderCredentialTesterProtocol,
     Depends(get_provider_credential_tester),
+]
+ModelCatalogDependency = Annotated[
+    ProviderModelCatalogProtocol,
+    Depends(get_provider_model_catalog),
 ]
 Offset = Annotated[int, Query(ge=0)]
 Limit = Annotated[int, Query(ge=1, le=100)]
@@ -155,6 +165,41 @@ async def list_provider_credentials(
         ).all()
     )
     return [_read_credential(credential, cipher) for credential in credentials]
+
+
+@router.get(
+    "/provider-credentials/{credential_id}/models",
+    response_model=ProviderModelCatalogRead,
+)
+async def list_provider_models(
+    credential_id: uuid.UUID,
+    session: SessionDependency,
+    cipher: CipherDependency,
+    catalog: ModelCatalogDependency,
+    current_user: CurrentUserDependency,
+    refresh: bool = Query(default=False),
+) -> ProviderModelCatalogRead:
+    credential = await get_owned_provider_credential(
+        session, current_user.id, credential_id
+    )
+    result = await catalog.discover(
+        credential.provider,
+        cipher.decrypt(credential.encrypted_payload),
+        cache_key=f"{credential.id}:{credential.updated_at.isoformat()}",
+        force_refresh=refresh,
+    )
+    return ProviderModelCatalogRead(
+        credential_id=credential.id,
+        provider=credential.provider,
+        models=[
+            ProviderModelEntry(id=model, label=model)
+            for model in result.models
+        ],
+        source=result.source,
+        cached=result.cached,
+        refreshed_at=result.refreshed_at,
+        warning=result.warning,
+    )
 
 
 @router.patch(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -294,6 +294,21 @@ class ProviderCredentialTestRequest(BaseModel):
 class ProviderCredentialTestRead(BaseModel):
     status: str
     checked_at: datetime
+
+
+class ProviderModelEntry(BaseModel):
+    id: str
+    label: str
+
+
+class ProviderModelCatalogRead(BaseModel):
+    credential_id: uuid.UUID
+    provider: str
+    models: list[ProviderModelEntry]
+    source: Literal["provider", "litellm", "manual"]
+    cached: bool
+    refreshed_at: datetime
+    warning: str | None = None
 
 
 class EvaluationRunCreate(BaseModel):

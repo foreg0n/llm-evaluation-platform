@@ -27,6 +27,8 @@ complete workflow.
   DeepSeek, xAI, Cohere, Together AI, Fireworks AI, Perplexity, Cerebras, and
   SambaNova
 - Custom OpenAI-compatible endpoint support
+- Credential-scoped live model discovery with caching, safe fallbacks, and
+  manual model-ID entry
 - Qwen 3.6 27B and GPT-OSS 20B compared in every default run
 - Asynchronous requests with configurable concurrency
 - A shared provider protocol for clean model integration
@@ -141,6 +143,14 @@ The built-in catalog includes the most common key-based LiteLLM providers. Use
 API, and provide its HTTP(S) base URL. Use HTTPS outside local development. A
 credential is sent to a provider only when you explicitly test it or run an
 evaluation.
+
+When a saved credential is selected in the model editor, Evalflow asks that
+provider for its current model list. The backend decrypts the key only for that
+request, normalizes the returned IDs for LiteLLM, and caches the result for five
+minutes. **Refresh models** bypasses the cache. If the provider list is
+unavailable, the UI falls back to LiteLLM's built-in catalog or lets you enter
+any compatible model ID manually; a discovery failure never blocks variant
+creation.
 
 The CLI can still use a server-side Groq key. Create one in the
 [GroqCloud Console](https://console.groq.com/keys), then copy the environment
@@ -639,6 +649,10 @@ The authenticated provider catalog is available at
 `GET /api/v1/providers/catalog`. Test a saved credential explicitly with
 `POST /api/v1/provider-credentials/{credential_id}/test`; its body contains the
 provider-specific LiteLLM model ID. Testing makes one minimal real API request.
+Discover the models visible to a saved key with
+`GET /api/v1/provider-credentials/{credential_id}/models`; add
+`?refresh=true` to bypass the bounded in-memory cache. This ownership-protected
+response contains model IDs and discovery metadata, never the API key.
 Deleting a credential attached to a model variant returns `409`.
 
 ### Importing a Dataset File
@@ -674,8 +688,9 @@ The complete experiment workflow is available without writing API requests:
 1. Open a project and import or create a dataset with test cases.
 2. Open **AI Providers** and add or test your personal provider credentials.
 3. Open **Models**, add the model variants you want to compare, enter their
-   LiteLLM model IDs, and attach the matching saved credentials. Evalflow also
-   includes Groq suggestions for Qwen 3.6 27B and GPT OSS 20B.
+   LiteLLM model IDs, and attach the matching saved credentials. Selecting a
+   credential loads its current provider model catalog; manual entry remains
+   available for new, private, or custom models.
 4. Open **Evaluation runs**, choose a dataset, select one or more models, set
    the number of parallel workers, and select **Start evaluation**.
 5. Keep the run open to see task progress and partial results refresh every
@@ -925,7 +940,7 @@ workflow succeeds.
 
 ## Production Releases and HTTPS Deployment
 
-Pushing a semantic version tag such as `v0.33.0` starts
+Pushing a semantic version tag such as `v0.34.0` starts
 `.github/workflows/release.yml`. It reruns the complete CI quality gate, then
 builds Linux AMD64 and ARM64 API/frontend/backup images and publishes exact-version,
 minor-version, and stable `latest` tags to GitHub Container Registry. Published
@@ -977,7 +992,7 @@ five minutes without stopping the API, worker, or frontend.
 Configure an off-site repository in `.env.production`:
 
 ```dotenv
-EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/llm-evaluation-platform-backup:0.33.0
+EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/llm-evaluation-platform-backup:0.34.0
 RESTIC_REPOSITORY=s3:https://s3.example.com/evalflow-production/postgres
 RESTIC_PASSWORD=replace-with-an-independent-encryption-password
 AWS_ACCESS_KEY_ID=replace-with-object-storage-access-key
@@ -1031,6 +1046,8 @@ email verification, password recovery, one-time/expired account tokens, login,
 refresh rotation/replay, logout, auth rate limiting, encrypted provider
 credentials, protected routes, and cross-user isolation. They do not read real
 API keys, connect to SMTP, Redis, or provider APIs, or modify PostgreSQL.
+Model-catalog tests inject fake discovery loaders, so CI never spends provider
+credits or depends on external model availability.
 
 ## Dataset Format
 
@@ -1209,6 +1226,10 @@ Users can manage encrypted BYOK credentials for multiple providers from the UI,
 test them explicitly, and bind different credentials to individual model
 variants. The worker resolves those credentials at execution time without
 placing plaintext secrets in Celery messages or evaluation records.
+The model editor now discovers the current catalog available to the selected
+credential through provider model-list endpoints, caches normalized results,
+supports an explicit refresh, and degrades to LiteLLM suggestions or manual
+entry without exposing the key to the browser.
 Authentication now uses memory-only access tokens plus rotating HttpOnly
 refresh sessions, supports current/all-session revocation, detects refresh-token
 replay, and rate-limits credential attempts through Redis in Docker Compose.
@@ -1216,7 +1237,7 @@ New accounts require email verification, and the password-recovery flow uses
 short-lived one-time tokens, generic request responses, and all-session
 revocation after a successful reset.
 
-Model-catalog discovery, large-run pagination, durable email/notification
-delivery, automated error/alert notification delivery, cloud-specific
+Large-run pagination, durable email/notification delivery, automated
+error/alert notification delivery, cloud-specific
 infrastructure-as-code, object-storage immutability policy, a managed secret
 store, and the first public cloud deployment remain future stages.

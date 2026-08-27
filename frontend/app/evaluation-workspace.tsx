@@ -18,6 +18,7 @@ import {
   type Project,
   type ProviderCatalogEntry,
   type ProviderCredential,
+  type ProviderModelCatalog,
 } from "./api";
 
 const MODEL_PRESETS = [
@@ -84,13 +85,94 @@ export function ModelWorkspace({
   const [draft, setDraft] = useState<VariantDraft>(emptyVariantDraft);
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [modelCatalog, setModelCatalog] =
+    useState<ProviderModelCatalog | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelCatalogError, setModelCatalogError] = useState("");
+
+  const modelOptions = useMemo(
+    () =>
+      draft.credentialId
+        ? (modelCatalog?.models ?? [])
+        : MODEL_PRESETS.map((model) => ({ id: model.value, label: model.label })),
+    [draft.credentialId, modelCatalog],
+  );
+
+  useEffect(() => {
+    if (!showModal || !draft.credentialId) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLoadingModels(true);
+      setModelCatalog(null);
+      setModelCatalogError("");
+      void apiRequest<ProviderModelCatalog>(
+        `/api/v1/provider-credentials/${draft.credentialId}/models`,
+        {},
+        token,
+      )
+        .then((catalog) => {
+          if (cancelled) return;
+          setModelCatalog(catalog);
+          setDraft((current) => ({
+            ...current,
+            model:
+              current.credentialId === catalog.credential_id && !current.model
+                ? (catalog.models[0]?.id ?? "")
+                : current.model,
+          }));
+        })
+        .catch((caught) => {
+          if (cancelled) return;
+          setModelCatalogError(
+            caught instanceof Error
+              ? caught.message
+              : "Could not discover provider models.",
+          );
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingModels(false);
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [draft.credentialId, showModal, token]);
+
+  async function refreshModels() {
+    if (!draft.credentialId) return;
+    setLoadingModels(true);
+    setModelCatalogError("");
+    try {
+      const catalog = await apiRequest<ProviderModelCatalog>(
+        `/api/v1/provider-credentials/${draft.credentialId}/models?refresh=true`,
+        {},
+        token,
+      );
+      setModelCatalog(catalog);
+      onNotice("Provider model catalog refreshed.");
+    } catch (caught) {
+      setModelCatalogError(
+        caught instanceof Error
+          ? caught.message
+          : "Could not refresh provider models.",
+      );
+    } finally {
+      setLoadingModels(false);
+    }
+  }
 
   function openCreate() {
     setEditing(null);
+    const credentialId = credentials[0]?.id ?? "";
     setDraft({
       ...emptyVariantDraft,
-      credentialId: credentials[0]?.id ?? "",
+      model: credentialId ? "" : MODEL_PRESETS[0].value,
+      credentialId,
     });
+    setModelCatalog(null);
+    setModelCatalogError("");
     setShowModal(true);
   }
 
@@ -106,6 +188,8 @@ export function ModelWorkspace({
       systemPrompt: variant.system_prompt ?? "",
       credentialId: variant.credential_id ?? "",
     });
+    setModelCatalog(null);
+    setModelCatalogError("");
     setShowModal(true);
   }
 
@@ -221,7 +305,7 @@ export function ModelWorkspace({
         <section className="panel stage-empty">
           <span>M</span>
           <h2>No model variants yet</h2>
-          <p>Add Qwen and GPT OSS configurations before launching a comparison.</p>
+          <p>Choose models discovered from your provider or enter an ID manually.</p>
           <button className="primary-button" onClick={openCreate} type="button">＋ Add first model</button>
         </section>
       )}
@@ -232,20 +316,14 @@ export function ModelWorkspace({
           <h2 id="variant-title">{editing ? "Edit model" : "Add a model"}</h2>
           <p>LiteLLM routes the model request through the encrypted provider credential you select.</p>
           <form onSubmit={saveVariant}>
-            <div className="form-grid">
-              <label>
-                Display name
-                <input maxLength={200} required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Qwen baseline" />
-              </label>
-              <label>
-                Model ID
-                <input list="model-presets" maxLength={300} required value={draft.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} />
-                <datalist id="model-presets">{MODEL_PRESETS.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}</datalist>
-              </label>
-            </div>
             <label>
               Provider credential
-              <select value={draft.credentialId} onChange={(event) => setDraft((current) => ({ ...current, credentialId: event.target.value }))}>
+              <select value={draft.credentialId} onChange={(event) => {
+                const credentialId = event.target.value;
+                setDraft((current) => ({ ...current, credentialId, model: credentialId ? "" : MODEL_PRESETS[0].value }));
+                setModelCatalog(null);
+                setModelCatalogError("");
+              }}>
                 <option value="">Server environment fallback</option>
                 {credentials.map((credential) => {
                   const provider = providerCatalog.find((entry) => entry.slug === credential.provider);
@@ -254,6 +332,31 @@ export function ModelWorkspace({
               </select>
               <small>{credentials.length ? "Only the credential ID is stored with this model." : "Add a key in AI Providers, or use the server environment key."}</small>
             </label>
+            {draft.credentialId && (
+              <div className={`model-catalog-status ${modelCatalogError ? "model-catalog-error" : ""}`}>
+                <span>
+                  {loadingModels
+                    ? "Discovering available models…"
+                    : modelCatalog
+                      ? `${modelCatalog.models.length} models · ${modelCatalog.source === "provider" ? "live provider catalog" : modelCatalog.source === "litellm" ? "LiteLLM fallback" : "manual entry"}${modelCatalog.cached ? " · cached" : ""}`
+                      : modelCatalogError || "Model discovery has not completed."}
+                  {modelCatalog?.warning && <small>{modelCatalog.warning}</small>}
+                </span>
+                <button className="secondary-button" disabled={loadingModels} onClick={() => void refreshModels()} type="button">Refresh models</button>
+              </div>
+            )}
+            <div className="form-grid">
+              <label>
+                Display name
+                <input maxLength={200} required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Qwen baseline" />
+              </label>
+              <label>
+                Model ID
+                <input list="model-catalog-options" maxLength={300} placeholder={loadingModels ? "Loading provider models…" : "Select or enter a model ID"} required value={draft.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} />
+                <datalist id="model-catalog-options">{modelOptions.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</datalist>
+                <small>Manual model IDs remain supported when a provider does not expose discovery.</small>
+              </label>
+            </div>
             <div className="form-grid three-fields">
               <label>Temperature<input min="0" max="2" step="0.1" required type="number" value={draft.temperature} onChange={(event) => setDraft((current) => ({ ...current, temperature: event.target.value }))} /></label>
               <label>Max tokens<input min="1" type="number" value={draft.maxTokens} onChange={(event) => setDraft((current) => ({ ...current, maxTokens: event.target.value }))} /></label>

@@ -41,3 +41,19 @@ test("keeps access tokens out of browser storage and enables cookie refresh", as
   assert.match(authSource, /window\.location\.hash/);
   assert.doesNotMatch(authSource, /sessionStorage|localStorage/);
 });
+
+test("discovers credential-scoped models while preserving manual entry", async () => {
+  const [workspaceSource, apiSource] = await Promise.all([
+    readFile(new URL("../app/evaluation-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(
+    workspaceSource,
+    /provider-credentials\/\$\{draft\.credentialId\}\/models/,
+  );
+  assert.match(workspaceSource, /refresh=true/);
+  assert.match(workspaceSource, /Refresh models/);
+  assert.match(workspaceSource, /Manual model IDs remain supported/);
+  assert.match(apiSource, /export type ProviderModelCatalog/);
+});

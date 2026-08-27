@@ -316,6 +316,11 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 .three-fields { grid-template-columns: repeat(3, 1fr); }
 .modal select { width: 100%; height: 44px; padding: 0 13px; border: 1px solid #30364a; border-radius: 8px; color: #d7dae4; background: #0e111b; outline: none; }
 .modal select:focus { border-color: var(--purple); }
+.model-catalog-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 11px 0; padding: 10px 12px; border: 1px solid rgb(78 166 255 / 0.22); border-radius: 8px; color: #8ec9ff; background: rgb(78 166 255 / 0.06); font-size: 9px; }
+.model-catalog-status > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.model-catalog-status small { color: #707b91; line-height: 1.4; }
+.model-catalog-status .secondary-button { min-height: 31px; flex: 0 0 auto; padding: 0 10px; font-size: 8px; }
+.model-catalog-error { border-color: rgb(242 111 125 / 0.25); color: #ef8c98; background: rgb(242 111 125 / 0.06); }
 
 /* Provider credentials */
 .provider-intro { background: radial-gradient(circle at 88% 22%, rgb(78 166 255 / 0.12), transparent 28%), var(--surface); }

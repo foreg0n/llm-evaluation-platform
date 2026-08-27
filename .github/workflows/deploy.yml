@@ -6,7 +6,7 @@ on:
       version:
         description: Published semantic version without the v prefix
         required: true
-        default: "0.33.0"
+        default: "0.34.0"
         type: string
       confirmation:
         description: Type deploy-production to confirm
