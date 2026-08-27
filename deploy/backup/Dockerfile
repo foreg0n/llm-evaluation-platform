@@ -1,6 +1,6 @@
 FROM restic/restic:0.19.1 AS restic
 
-FROM postgres:17-alpine
+FROM postgres:18-alpine
 
 RUN apk add --no-cache ca-certificates tzdata \
     && mkdir -p /cache /repository /state /opt/evalflow-backup \
