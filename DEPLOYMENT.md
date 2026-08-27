@@ -5,20 +5,66 @@ the only public service: it terminates HTTPS and routes same-origin browser API
 requests to FastAPI. PostgreSQL, Redis, the worker, and their metrics endpoints
 have no host ports.
 
-## 1. Prepare the server
+## 1. Provision a fresh server
 
-Install Docker Engine with the Compose plugin. Point a DNS `A` record (and an
-`AAAA` record when IPv6 is configured) for your hostname to the server. Allow
-inbound TCP ports `80` and `443`; allow UDP `443` for HTTP/3.
+Start with Ubuntu 22.04, 24.04, or 26.04. Point a DNS `A` record (and an `AAAA`
+record when IPv6 is configured) for your hostname to the server. In the cloud
+firewall allow the chosen SSH port, TCP `80/443`, and UDP `443` for HTTP/3. Do
+not expose PostgreSQL, Redis, the API, or worker metrics ports.
 
-Clone the repository and create the private environment file:
+Generate a dedicated ED25519 deployment key on the administrator workstation.
+Do not reuse a personal key:
 
 ```bash
-git clone https://github.com/foreg0n/llm-evaluation-platform.git
-cd llm-evaluation-platform
-cp .env.production.example .env.production
-chmod 600 .env.production
+ssh-keygen -t ed25519 -f ./evalflow-production -C evalflow-production
 ```
+
+Obtain the exact tagged repository source on the server and run the idempotent
+bootstrap through its console or an existing administrative SSH session:
+
+```bash
+sudo EVALFLOW_SSH_PUBLIC_KEY="$(cat ./evalflow-production.pub)" \
+  EVALFLOW_SSH_PORT=22 \
+  bash infra/provision-ubuntu.sh
+```
+
+It installs Docker Engine and Compose from Docker's official Ubuntu repository,
+enables fail2ban and unattended security updates, creates the locked `evalflow`
+account, and prepares `/opt/evalflow`. It refuses to remove conflicting Docker
+packages automatically. See [infra/README.md](infra/README.md) for the bounded
+manual resolution and host-key verification procedure.
+
+The deployment account belongs to the `docker` group and is therefore
+root-equivalent. Protect and rotate its private key accordingly.
+
+## 2. Configure the GitHub production Environment
+
+In the repository, open **Settings → Environments → New environment** and name
+it `production`. Add a required reviewer, prevent self-review when the plan
+supports it, and restrict deployment branches/tags to the release policy.
+
+Add these Environment variables:
+
+- `APP_DOMAIN`: the public hostname without `https://`;
+- `DEPLOY_HOST`: the verified server hostname or IP;
+- `DEPLOY_PORT`: the SSH port, normally `22`;
+- `DEPLOY_USER`: the provisioned account, normally `evalflow`.
+
+Add these Environment secrets:
+
+- `DEPLOY_SSH_PRIVATE_KEY`: the complete dedicated private key;
+- `DEPLOY_SSH_KNOWN_HOSTS`: the complete, independently verified host-key line;
+- `PRODUCTION_ENV_FILE`: the complete production dotenv file described below.
+
+Collect the host-key line from a trusted workstation, verify its fingerprint in
+the cloud console, and only then store it. The workflow intentionally does not
+trust a live `ssh-keyscan` result during deployment.
+
+## 3. Prepare the production environment
+
+Copy `.env.production.example` locally and replace every placeholder. The
+deployment workflow rewrites the three image values to the approved version, so
+they remain useful only for local validation.
 
 Generate independent secrets. The hexadecimal output is URL-safe and can be
 used for the database, Redis, and JWT signing values:
@@ -28,85 +74,88 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Edit `.env.production`. Set the real domain, email, SMTP configuration, image
-tags, and independent application, backup, and storage secrets. Never commit this file. Keep a secure backup of
+Set the real domain, email, SMTP configuration, and independent application,
+backup, and storage secrets. Save the complete content as the Environment secret
+`PRODUCTION_ENV_FILE`; never commit it. Keep a secure backup of
 `CREDENTIAL_ENCRYPTION_KEY`; losing it makes stored provider credentials
 unreadable.
 
-## 2. Validate and start
-
-Validate interpolation before changing any running containers:
+Validate interpolation locally before storing it or changing any running
+containers:
 
 ```bash
 docker compose --env-file .env.production -f compose.production.yaml config --quiet
 ```
 
-Pull the immutable release images and start the stack:
+## 4. Publish and deploy a release
+
+Commit and push the release-ready code, then create a semantic version tag:
 
 ```bash
-docker compose --env-file .env.production -f compose.production.yaml pull
-docker compose --env-file .env.production -f compose.production.yaml up -d
-docker compose --env-file .env.production -f compose.production.yaml ps -a
+git switch main
+git pull --ff-only
+git tag -a v0.33.0 -m "Evalflow v0.33.0"
+git push origin v0.33.0
 ```
 
-The one-shot `migrate` service must finish with exit code `0`. The other six
-services should become healthy. Inspect startup without exposing secrets:
+Wait for **Release container images** to succeed. Then open **Actions → Deploy
+production → Run workflow**, enter `0.33.0` and the literal confirmation
+`deploy-production`, and approve the `production` Environment review.
+
+The workflow checks out the exact tag, verifies the API/frontend/backup image
+manifests, pins the SSH host identity, and invokes the server-side deployment
+script. The script validates the candidate environment before changing the
+active file, takes an on-demand backup when an existing stack is present, pulls
+the exact images, starts the dependency-ordered stack, verifies the migration
+exit code and all seven long-running services, then checks public HTTPS. A
+filesystem lock prevents two deployments from running at once.
+
+Inspect status without exposing secrets:
 
 ```bash
 docker compose --env-file .env.production -f compose.production.yaml logs --tail=200 migrate api worker frontend caddy
 curl -fsS https://evalflow.example.com/health
 ```
 
-Replace the example hostname in the final command. `/ready`, `/metrics`, the
-API documentation, PostgreSQL, Redis, and worker metrics intentionally remain
-private in this topology.
+The one-shot `migrate` service must finish with exit code `0`; all long-running
+services must be healthy. `/ready`, `/metrics`, API documentation, PostgreSQL,
+Redis, and worker metrics intentionally remain private in this topology.
 
-## 3. Publish a release
+## 5. Manual deployment fallback
 
-The release workflow runs the complete CI suite before publishing multi-arch
-API and frontend images to GitHub Container Registry. It starts only for a
-semantic version tag:
+If GitHub Actions is unavailable, copy the exact tagged `compose.production.yaml`,
+`deploy/Caddyfile`, and `deploy/scripts/deploy-production.sh` into
+`/opt/evalflow`; write the reviewed dotenv content to
+`.env.production.incoming` with mode `0600`; then invoke the same guarded script:
 
 ```bash
-git switch main
-git pull --ff-only
-git tag -a v0.32.0 -m "Evalflow v0.32.0"
-git push origin v0.32.0
+cd /opt/evalflow
+chmod 0555 deploy/scripts/deploy-production.sh
+deploy/scripts/deploy-production.sh 0.33.0 foreg0n/llm-evaluation-platform
 ```
-
-After the **Release container images** workflow succeeds, set all three image values
-in `.env.production` to the new exact version, then run `pull` and `up -d`
-again. The frontend release image uses same-origin `/api` requests, so it is
-portable across domains behind Caddy.
 
 For a public repository, make all three GHCR packages public or grant the server
 read access and run `docker login ghcr.io` before `pull`.
 
-## 4. Upgrade and roll back
+## 6. Upgrade and recover
 
-The v0.32 stack creates encrypted PostgreSQL backups automatically, but verify
-freshness and create an on-demand recovery point before every upgrade:
+The protected deployment performs the freshness check and on-demand recovery
+point automatically. Operators can also run both checks manually:
 
 ```bash
 docker compose --env-file .env.production -f compose.production.yaml exec backup health
 docker compose --env-file .env.production -f compose.production.yaml run --rm backup backup
 ```
 
-To deploy a newer version, change all three image tags, validate, pull, and
-recreate the services:
+The server preserves the previous dotenv file at
+`/opt/evalflow/.env.production.previous`. It does not roll back automatically:
+database migrations are forward-only, and blindly restoring old containers may
+be incompatible with the new schema. For an application-only failure with a
+compatible schema, review the previous file and deliberately redeploy the prior
+tag. For an incompatible migration, follow the release-specific database
+recovery plan and restore a verified snapshot during a maintenance window.
 
-```bash
-docker compose --env-file .env.production -f compose.production.yaml config --quiet
-docker compose --env-file .env.production -f compose.production.yaml pull
-docker compose --env-file .env.production -f compose.production.yaml up -d
-```
-
-To roll back application code, restore all three previous image tags and repeat the
-commands. Database migrations are forward-only; if a release includes an
-incompatible migration, follow that release's database restore instructions
-instead of assuming an image rollback can reverse the schema.
-
-## 5. Backups and restore drills
+## 7. Backups and restore drills
 
 Use a bucket outside the application server. Restrict its credentials to the
 backup prefix, enable provider-side versioning or object lock when available,
@@ -142,7 +191,7 @@ configured number of public tables. A real disaster recovery still requires a
 planned maintenance window, a new empty target database, application shutdown,
 and validation before traffic is switched.
 
-## 6. Operations
+## 8. Operations
 
 Follow application and backup logs:
 

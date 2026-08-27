@@ -84,6 +84,9 @@ complete workflow.
 - Encrypted off-site PostgreSQL backups with daily/weekly/monthly retention
 - Backup freshness health checks and automated retry scheduling
 - Isolated end-to-end restore drills that verify schema and table integrity
+- Idempotent Ubuntu VPS bootstrap with official Docker packages and SSH key access
+- Protected, serialized production deployments from exact Git tags
+- Pinned SSH host identity, pre-deploy backups, migrations, and public health gates
 
 ## Requirements
 
@@ -901,8 +904,9 @@ The quality gate contains five jobs:
 2. **Frontend lint, build, and tests** — installs the exact npm lockfile on
    Node.js 22, runs ESLint, builds the production Vinext bundle, and executes
    server-render/security tests.
-3. **Compose validation** — parses the local full-stack, hardened production,
-   and backup-drill configurations with non-secret CI placeholder values.
+3. **Configuration validation** — checks the provisioning/deployment shell
+   scripts and parses the local full-stack, hardened production, and
+   backup-drill configurations with non-secret CI placeholder values.
 4. **Backup/restore drill** — migrates a fresh PostgreSQL source, creates an
    encrypted restic snapshot, restores it into an isolated target, and verifies
    the schema plus public tables.
@@ -921,13 +925,20 @@ workflow succeeds.
 
 ## Production Releases and HTTPS Deployment
 
-Pushing a semantic version tag such as `v0.32.0` starts
+Pushing a semantic version tag such as `v0.33.0` starts
 `.github/workflows/release.yml`. It reruns the complete CI quality gate, then
 builds Linux AMD64 and ARM64 API/frontend/backup images and publishes exact-version,
 minor-version, and stable `latest` tags to GitHub Container Registry. Published
-images include OCI source/revision labels, build provenance, and an SBOM. No
-server credentials are stored in GitHub and the workflow does not deploy to a
-machine automatically.
+images include OCI source/revision labels, build provenance, and an SBOM.
+
+After that release succeeds, the separate **Deploy production** workflow can
+deploy the exact tag. It runs only through manual dispatch, requires the literal
+confirmation `deploy-production`, serializes production changes, and enters the
+GitHub `production` Environment before any deployment secret is available.
+Configure a required reviewer and restrict deployment branches/tags in that
+Environment. The workflow verifies all three GHCR manifests, checks out the
+matching tag, pins the server host key, and sends only the release bundle plus a
+protected environment file to the server.
 
 `compose.production.yaml` is intentionally separate from the local development
 stack. It pulls immutable release images, forces secure refresh cookies, uses
@@ -939,11 +950,20 @@ and renews the domain certificate, redirects HTTP to HTTPS, adds baseline
 security headers, and routes `/api/*` and `/health` to FastAPI. `/ready`,
 `/metrics`, API documentation, databases, and worker metrics stay private.
 
-Copy `.env.production.example` to `.env.production`, replace every placeholder,
-point the domain DNS record at the server, and follow the validation, release,
-upgrade, and rollback commands in [DEPLOYMENT.md](DEPLOYMENT.md). The production
-environment file is explicitly ignored by Git; only its placeholder template is
-tracked.
+The cloud-neutral bootstrap in `infra/provision-ubuntu.sh` prepares a fresh
+supported Ubuntu host with Docker's official packages, a dedicated deployment
+account, fail2ban, and unattended security updates. The remote deployment script
+validates a candidate environment before activating it, takes an encrypted
+database backup on upgrades, locks concurrent deploys, waits for migrations and
+all service health checks, and finally verifies public HTTPS. It preserves the
+previous environment file for an operator-led rollback; database migrations are
+forward-only and are never rolled back automatically.
+
+Copy `.env.production.example`, replace every placeholder, point the domain DNS
+record at the server, and follow the bootstrap, GitHub Environment, release,
+deployment, and recovery instructions in [DEPLOYMENT.md](DEPLOYMENT.md). The
+production environment file is explicitly ignored by Git; only its placeholder
+template is tracked.
 
 ### Encrypted Backups and Restore Drills
 
@@ -957,7 +977,7 @@ five minutes without stopping the API, worker, or frontend.
 Configure an off-site repository in `.env.production`:
 
 ```dotenv
-EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/llm-evaluation-platform-backup:0.32.0
+EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/llm-evaluation-platform-backup:0.33.0
 RESTIC_REPOSITORY=s3:https://s3.example.com/evalflow-production/postgres
 RESTIC_PASSWORD=replace-with-an-independent-encryption-password
 AWS_ACCESS_KEY_ID=replace-with-object-storage-access-key
@@ -1088,6 +1108,8 @@ llm-evaluation-platform/
 │   ├── backup/
 │   │   ├── scripts/
 │   │   └── Dockerfile
+│   ├── scripts/
+│   │   └── deploy-production.sh
 │   └── Caddyfile
 ├── evals/
 │   ├── datasets/
@@ -1113,6 +1135,9 @@ llm-evaluation-platform/
 │   ├── .dockerignore
 │   ├── .env.example
 │   └── package.json
+├── infra/
+│   ├── provision-ubuntu.sh
+│   └── README.md
 ├── observability/
 │   ├── grafana/
 │   │   ├── dashboards/
@@ -1174,7 +1199,12 @@ SBOM are published to GHCR. A scheduled backup service now produces encrypted
 off-site PostgreSQL snapshots with bounded retention and freshness health
 checks. The CI and production restore profiles prove the latest snapshot can be
 loaded into an isolated database with a valid Alembic version and expected
-schema size.
+schema size. A cloud-neutral Ubuntu bootstrap and protected GitHub deployment
+workflow now automate a first single-server deployment without embedding cloud
+credentials. Deployments are manual, serialized, bound to an exact release tag,
+protected by pinned SSH host identity and Environment approval, and gated by a
+pre-deploy backup, successful migration, internal service health, and public
+HTTPS health.
 Users can manage encrypted BYOK credentials for multiple providers from the UI,
 test them explicitly, and bind different credentials to individual model
 variants. The worker resolves those credentials at execution time without
@@ -1187,6 +1217,6 @@ short-lived one-time tokens, generic request responses, and all-session
 revocation after a successful reset.
 
 Model-catalog discovery, large-run pagination, durable email/notification
-delivery, automated error/alert notification delivery, infrastructure
-provisioning, object-storage immutability policy, and the first public cloud
-deployment remain future stages.
+delivery, automated error/alert notification delivery, cloud-specific
+infrastructure-as-code, object-storage immutability policy, a managed secret
+store, and the first public cloud deployment remain future stages.

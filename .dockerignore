@@ -13,6 +13,7 @@
 artifacts/*.json
 frontend
 deploy
+infra
 observability
 tests
 compose*.yaml

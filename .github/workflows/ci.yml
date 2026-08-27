@@ -103,6 +103,10 @@ jobs:
         run: docker compose -f compose.production.yaml config --quiet
       - name: Validate backup drill Compose file
         run: docker compose -f compose.backup-drill.yaml config --quiet
+      - name: Validate deployment and backup shell syntax
+        run: |
+          bash -n infra/provision-ubuntu.sh deploy/scripts/deploy-production.sh
+          for script in deploy/backup/scripts/*.sh; do sh -n "$script"; done
       - name: Validate Caddy HTTPS configuration
         run: >-
           docker run --rm

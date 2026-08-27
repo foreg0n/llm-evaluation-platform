@@ -1,0 +1,129 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published semantic version without the v prefix
+        required: true
+        default: "0.33.0"
+        type: string
+      confirmation:
+        description: Type deploy-production to confirm
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate deployment request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate version and confirmation
+        shell: bash
+        env:
+          DEPLOY_VERSION: ${{ inputs.version }}
+          DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          [[ "$DEPLOY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          [[ "$DEPLOY_CONFIRMATION" == "deploy-production" ]]
+
+  deploy:
+    name: Deploy v${{ inputs.version }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://${{ vars.APP_DOMAIN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          ref: v${{ inputs.version }}
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify all release images exist
+        shell: bash
+        env:
+          DEPLOY_VERSION: ${{ inputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          repository="${REPOSITORY,,}"
+          for component in api frontend backup; do
+            docker manifest inspect "ghcr.io/$repository-$component:$DEPLOY_VERSION" >/dev/null
+          done
+      - name: Configure pinned SSH host identity
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          : "${SSH_PRIVATE_KEY:?Missing DEPLOY_SSH_PRIVATE_KEY}"
+          : "${SSH_KNOWN_HOSTS:?Missing DEPLOY_SSH_KNOWN_HOSTS}"
+          install -d -m 0700 "$RUNNER_TEMP/evalflow-ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/evalflow-ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/evalflow-ssh/known_hosts"
+          chmod 0600 "$RUNNER_TEMP/evalflow-ssh/id_ed25519"
+          chmod 0644 "$RUNNER_TEMP/evalflow-ssh/known_hosts"
+      - name: Upload bundle and deploy approved version
+        shell: bash
+        env:
+          DEPLOY_VERSION: ${{ inputs.version }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER || 'evalflow' }}
+          PRODUCTION_ENV_FILE: ${{ secrets.PRODUCTION_ENV_FILE }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          : "${DEPLOY_HOST:?Missing production DEPLOY_HOST variable}"
+          : "${PRODUCTION_ENV_FILE:?Missing PRODUCTION_ENV_FILE secret}"
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+
+          key="$RUNNER_TEMP/evalflow-ssh/id_ed25519"
+          known_hosts="$RUNNER_TEMP/evalflow-ssh/known_hosts"
+          bundle="$RUNNER_TEMP/evalflow-$DEPLOY_VERSION.tgz"
+          remote="$DEPLOY_USER@$DEPLOY_HOST"
+          ssh_options=(-i "$key" -p "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts")
+
+          tar -czf "$bundle" compose.production.yaml deploy/Caddyfile deploy/scripts/deploy-production.sh
+          ssh "${ssh_options[@]}" "$remote" 'mkdir -p /opt/evalflow'
+          scp -i "$key" -P "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known_hosts" \
+            "$bundle" "$remote:/opt/evalflow/release-$DEPLOY_VERSION.tgz"
+          printf '%s\n' "$PRODUCTION_ENV_FILE" | \
+            ssh "${ssh_options[@]}" "$remote" 'umask 077; cat > /opt/evalflow/.env.production.incoming'
+          ssh "${ssh_options[@]}" "$remote" \
+            "cd /opt/evalflow && tar -xzf release-$DEPLOY_VERSION.tgz && rm -f release-$DEPLOY_VERSION.tgz && chmod 0555 deploy/scripts/deploy-production.sh && deploy/scripts/deploy-production.sh '$DEPLOY_VERSION' '$REPOSITORY'"
+      - name: Verify public HTTPS health from runner
+        shell: bash
+        env:
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+        run: |
+          : "${APP_DOMAIN:?Missing production APP_DOMAIN variable}"
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 \
+            --retry-all-errors --max-time 15 "https://$APP_DOMAIN/health"
+      - name: Record deployment summary
+        shell: bash
+        env:
+          DEPLOY_VERSION: ${{ inputs.version }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+        run: |
+          deployed_commit="$(git rev-parse HEAD)"
+          printf '### Evalflow v%s deployed\n\n- URL: https://%s\n- Commit: `%s`\n' \
+            "$DEPLOY_VERSION" "$APP_DOMAIN" "$deployed_commit" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove SSH material from runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/evalflow-ssh"
