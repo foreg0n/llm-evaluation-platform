@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,36 +25,46 @@ from backend.db.models import (
 from backend.db.session import get_db_session
 from backend.schemas import (
     EvaluationResultRead,
+    EvaluationResultPage,
     EvaluationRunCreate,
     EvaluationRunDetail,
     EvaluationRunRead,
+    EvaluationVariantSummary,
 )
 from backend.services.schedulers import RunScheduler, get_run_scheduler
-from evals.models import (
-    EvaluationResult as CoreEvaluationResult,
-    MetricScores,
-    Variant as CoreVariant,
-)
-from evals.runner import summarize_results
 
 router = APIRouter(prefix="/api/v1", tags=["evaluation runs"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 SchedulerDependency = Annotated[RunScheduler, Depends(get_run_scheduler)]
 Offset = Annotated[int, Query(ge=0)]
 Limit = Annotated[int, Query(ge=1, le=100)]
+ResultStatus = Literal["all", "successful", "errors", "low-quality"]
+ResultSort = Literal[
+    "default",
+    "quality-asc",
+    "quality-desc",
+    "latency-asc",
+    "latency-desc",
+    "tokens-asc",
+    "tokens-desc",
+]
 
 
 async def _load_run_or_404(
-    session: AsyncSession, owner_id: uuid.UUID, run_id: uuid.UUID
+    session: AsyncSession,
+    owner_id: uuid.UUID,
+    run_id: uuid.UUID,
+    *,
+    include_results: bool,
 ) -> EvaluationRun:
+    options = [selectinload(EvaluationRun.variants)]
+    if include_results:
+        options.append(selectinload(EvaluationRun.results))
     query = (
         select(EvaluationRun)
         .join(Project)
         .where(EvaluationRun.id == run_id, Project.owner_id == owner_id)
-        .options(
-            selectinload(EvaluationRun.variants),
-            selectinload(EvaluationRun.results),
-        )
+        .options(*options)
     )
     run = (await session.scalars(query)).one_or_none()
     if run is None:
@@ -62,58 +72,115 @@ async def _load_run_or_404(
     return run
 
 
-def _core_variant(variant: DatabaseVariant) -> CoreVariant:
-    return CoreVariant(
-        name=variant.name,
-        model=variant.model,
-        provider=variant.provider,
-        temperature=variant.temperature,
-        max_tokens=variant.max_tokens,
-        system_prompt=variant.system_prompt,
-        timeout_seconds=variant.timeout_seconds,
-        max_retries=variant.max_retries,
+async def _summarize_database_results(
+    session: AsyncSession,
+    run: EvaluationRun,
+) -> list[EvaluationVariantSummary]:
+    result = DatabaseEvaluationResult
+    exact_match = result.metrics["exact_match"].as_float()
+    normalized_exact_match = result.metrics["normalized_exact_match"].as_float()
+    keyword_score = result.metrics["keyword_score"].as_float()
+    quality = (exact_match + normalized_exact_match + keyword_score) / 3.0
+    row_query = (
+        select(
+            result.variant_id.label("variant_id"),
+            func.count(result.id).label("result_count"),
+            func.avg(exact_match).label("average_exact_match"),
+            func.avg(normalized_exact_match).label(
+                "average_normalized_exact_match"
+            ),
+            func.avg(keyword_score).label("average_keyword_score"),
+            func.avg(quality).label("average_quality"),
+            func.avg(func.coalesce(result.latency_ms, 0.0)).label(
+                "average_latency_ms"
+            ),
+            func.sum(func.coalesce(result.input_tokens, 0)).label(
+                "total_input_tokens"
+            ),
+            func.sum(func.coalesce(result.output_tokens, 0)).label(
+                "total_output_tokens"
+            ),
+            func.sum(func.coalesce(result.total_tokens, 0)).label("total_tokens"),
+            func.sum(func.coalesce(result.estimated_cost, 0)).label(
+                "total_estimated_cost"
+            ),
+            func.sum(result.retry_count).label("total_retries"),
+            func.sum(case((result.error.is_not(None), 1), else_=0)).label(
+                "error_count"
+            ),
+        )
+        .where(result.run_id == run.id)
+        .group_by(result.variant_id)
     )
-
-
-def _run_detail(run: EvaluationRun) -> EvaluationRunDetail:
+    rows = {
+        row.variant_id: row
+        for row in (await session.execute(row_query)).all()
+    }
     ordered_variants = sorted(
         run.variants, key=lambda value: (value.name, str(value.id))
     )
-    ordered_results = sorted(
-        run.results,
-        key=lambda value: (str(value.dataset_item_id), str(value.variant_id)),
-    )
-    variants_by_id = {variant.id: variant for variant in ordered_variants}
-    core_variants = [_core_variant(variant) for variant in ordered_variants]
-    core_results = [
-        CoreEvaluationResult(
-            item_id=str(result.dataset_item_id),
-            variant_name=variants_by_id[result.variant_id].name,
-            model=result.model,
-            provider=result.provider,
-            input=result.input,
-            expected_output=result.expected_output,
-            output=result.output,
-            latency_ms=result.latency_ms or 0.0,
-            metrics=(
-                MetricScores.model_validate(result.metrics)
-                if result.metrics is not None
-                else None
-            ),
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens,
-            total_tokens=result.total_tokens,
-            estimated_cost=(
-                float(result.estimated_cost)
-                if result.estimated_cost is not None
-                else None
-            ),
-            retry_count=result.retry_count,
-            error=result.error,
+    summaries: list[EvaluationVariantSummary] = []
+    for variant in ordered_variants:
+        row = rows.get(variant.id)
+        if row is None:
+            summaries.append(
+                EvaluationVariantSummary(
+                    variant_name=variant.name,
+                    result_count=0,
+                    average_exact_match=0,
+                    average_normalized_exact_match=0,
+                    average_keyword_score=0,
+                    average_quality=0,
+                    average_latency_ms=0,
+                    total_input_tokens=0,
+                    total_output_tokens=0,
+                    total_tokens=0,
+                    total_estimated_cost=0,
+                    total_retries=0,
+                    error_count=0,
+                )
+            )
+            continue
+        summaries.append(
+            EvaluationVariantSummary(
+                variant_name=variant.name,
+                result_count=int(row.result_count),
+                average_exact_match=float(row.average_exact_match or 0),
+                average_normalized_exact_match=float(
+                    row.average_normalized_exact_match or 0
+                ),
+                average_keyword_score=float(row.average_keyword_score or 0),
+                average_quality=float(row.average_quality or 0),
+                average_latency_ms=float(row.average_latency_ms or 0),
+                total_input_tokens=int(row.total_input_tokens or 0),
+                total_output_tokens=int(row.total_output_tokens or 0),
+                total_tokens=int(row.total_tokens or 0),
+                total_estimated_cost=float(row.total_estimated_cost or 0),
+                total_retries=int(row.total_retries or 0),
+                error_count=int(row.error_count or 0),
+            )
         )
-        for result in ordered_results
-    ]
-    summaries = summarize_results(core_results, core_variants)
+    return summaries
+
+
+async def _run_detail(
+    session: AsyncSession,
+    run: EvaluationRun,
+    *,
+    include_results: bool,
+) -> EvaluationRunDetail:
+    ordered_variants = sorted(
+        run.variants, key=lambda value: (value.name, str(value.id))
+    )
+    ordered_results = (
+        sorted(
+            run.results,
+            key=lambda value: (str(value.dataset_item_id), str(value.variant_id)),
+        )
+        if include_results
+        else []
+    )
+    summaries = await _summarize_database_results(session, run)
 
     return EvaluationRunDetail(
         id=run.id,
@@ -129,7 +196,7 @@ def _run_detail(run: EvaluationRun) -> EvaluationRunDetail:
         created_at=run.created_at,
         updated_at=run.updated_at,
         variant_ids=[variant.id for variant in ordered_variants],
-        summary=[summary.model_dump() for summary in summaries],
+        summary=summaries,
         results=[
             EvaluationResultRead.model_validate(result)
             for result in ordered_results
@@ -243,9 +310,113 @@ async def get_evaluation_run(
     run_id: uuid.UUID,
     session: SessionDependency,
     current_user: CurrentUserDependency,
+    include_results: bool = Query(default=True),
 ) -> EvaluationRunDetail:
-    return _run_detail(
-        await _load_run_or_404(session, current_user.id, run_id)
+    run = await _load_run_or_404(
+        session,
+        current_user.id,
+        run_id,
+        include_results=include_results,
+    )
+    return await _run_detail(session, run, include_results=include_results)
+
+
+def _filtered_results_query(
+    run_id: uuid.UUID,
+    *,
+    search: str | None,
+    variant_id: uuid.UUID | None,
+    result_status: ResultStatus,
+):
+    result = DatabaseEvaluationResult
+    query = select(result).where(result.run_id == run_id)
+    if search:
+        query = query.where(
+            func.lower(result.input).contains(
+                search.strip().lower(), autoescape=True
+            )
+        )
+    if variant_id is not None:
+        query = query.where(result.variant_id == variant_id)
+    if result_status == "successful":
+        query = query.where(result.error.is_(None))
+    elif result_status == "errors":
+        query = query.where(result.error.is_not(None))
+    elif result_status == "low-quality":
+        quality = (
+            result.metrics["exact_match"].as_float()
+            + result.metrics["normalized_exact_match"].as_float()
+            + result.metrics["keyword_score"].as_float()
+        ) / 3.0
+        query = query.where(result.metrics.is_not(None), quality < 0.67)
+    return query
+
+
+def _order_results(query, sort: ResultSort):
+    result = DatabaseEvaluationResult
+    quality = (
+        result.metrics["exact_match"].as_float()
+        + result.metrics["normalized_exact_match"].as_float()
+        + result.metrics["keyword_score"].as_float()
+    ) / 3.0
+    orders = {
+        "quality-asc": (quality.is_(None), quality.asc()),
+        "quality-desc": (quality.is_(None), quality.desc()),
+        "latency-asc": (result.latency_ms.is_(None), result.latency_ms.asc()),
+        "latency-desc": (result.latency_ms.is_(None), result.latency_ms.desc()),
+        "tokens-asc": (result.total_tokens.is_(None), result.total_tokens.asc()),
+        "tokens-desc": (result.total_tokens.is_(None), result.total_tokens.desc()),
+    }
+    if sort in orders:
+        query = query.order_by(*orders[sort])
+    else:
+        query = query.order_by(result.dataset_item_id, result.variant_id)
+    return query.order_by(result.id)
+
+
+@router.get(
+    "/runs/{run_id}/results/page",
+    response_model=EvaluationResultPage,
+)
+async def get_evaluation_result_page(
+    run_id: uuid.UUID,
+    session: SessionDependency,
+    current_user: CurrentUserDependency,
+    offset: Offset = 0,
+    limit: Limit = 25,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+    variant_id: uuid.UUID | None = None,
+    result_status: ResultStatus = "all",
+    sort: ResultSort = "default",
+) -> EvaluationResultPage:
+    await get_owned_run(session, current_user.id, run_id)
+    filtered = _filtered_results_query(
+        run_id,
+        search=search,
+        variant_id=variant_id,
+        result_status=result_status,
+    )
+    total = int(
+        (
+            await session.scalar(
+                select(func.count()).select_from(filtered.order_by(None).subquery())
+            )
+        )
+        or 0
+    )
+    items = list(
+        (
+            await session.scalars(
+                _order_results(filtered, sort).offset(offset).limit(limit)
+            )
+        ).all()
+    )
+    return EvaluationResultPage(
+        items=[EvaluationResultRead.model_validate(item) for item in items],
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=offset + len(items) < total,
     )
 
 

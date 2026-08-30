@@ -15,7 +15,7 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,7 @@ from backend.schemas import (
     DatasetCreate,
     DatasetImportRead,
     DatasetItemCreate,
+    DatasetItemPage,
     DatasetItemRead,
     DatasetItemUpdate,
     DatasetRead,
@@ -367,6 +368,49 @@ async def list_dataset_items(
         .limit(limit)
     )
     return list(result.all())
+
+
+@router.get(
+    "/datasets/{dataset_id}/items/page",
+    response_model=DatasetItemPage,
+    tags=["dataset items"],
+)
+async def get_dataset_item_page(
+    dataset_id: uuid.UUID,
+    session: SessionDependency,
+    current_user: CurrentUserDependency,
+    offset: Offset = 0,
+    limit: Limit = 50,
+) -> DatasetItemPage:
+    await get_owned_dataset(session, current_user.id, dataset_id)
+    total = int(
+        (
+            await session.scalar(
+                select(func.count(DatasetItem.id)).where(
+                    DatasetItem.dataset_id == dataset_id
+                )
+            )
+        )
+        or 0
+    )
+    items = list(
+        (
+            await session.scalars(
+                select(DatasetItem)
+                .where(DatasetItem.dataset_id == dataset_id)
+                .order_by(DatasetItem.created_at, DatasetItem.id)
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    return DatasetItemPage(
+        items=[DatasetItemRead.model_validate(item) for item in items],
+        total=total,
+        offset=offset,
+        limit=limit,
+        has_more=offset + len(items) < total,
+    )
 
 
 @router.get(

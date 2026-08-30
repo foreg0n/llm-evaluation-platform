@@ -58,12 +58,14 @@ complete workflow.
 - Project workspaces with real dataset and test-case CRUD operations
 - Editable prompts, reference answers, and comma-separated evaluation keywords
 - Atomic JSON, JSONL, and NDJSON dataset import with file-wide validation
+- Incremental dataset-item loading with an exact server-side total
 - In-app model-variant creation, editing, and deletion
 - Frontend evaluation launch with dataset, model, and concurrency selection
 - Live run progress, cooperative cancellation, and partial-result polling
 - Model leaderboard with quality, latency, token, cost, retry, and error data
 - Live comparison charts for quality, latency, tokens, cost, and provider errors
-- Client-side result search, model/status filters, and metric sorting
+- Server-side result pagination, prompt/model/status filters, and metric sorting
+- SQL-computed live summaries that do not materialize every result row
 - Completed-run comparison with overall and per-model metric deltas
 - Browser-side JSON and Excel-friendly CSV exports for runs and comparisons
 - Structured JSON logs with HTTP, evaluation-run, and Celery lifecycle events
@@ -234,6 +236,9 @@ revocation chain. No plaintext refresh token is stored in PostgreSQL.
 Migration `20260825_0006` marks existing users as verified, adds
 `email_verified_at`, and creates hashed one-time tokens for email verification
 and password recovery. New accounts remain unverified until their link is used.
+
+Migration `20260830_0007` adds composite indexes for stable run-result pages and
+per-model filtering within large evaluation runs.
 
 Start the API from the repository root:
 
@@ -681,6 +686,11 @@ The protected multipart endpoint is:
 POST /api/v1/projects/{project_id}/datasets/import
 ```
 
+The dataset workspace requests 50 test cases at a time from
+`GET /api/v1/datasets/{dataset_id}/items/page`. The response includes the exact
+total and a `has_more` flag, so an imported 1,000-item benchmark is never
+silently truncated in the UI.
+
 ## Running an Evaluation from the Frontend
 
 The complete experiment workflow is available without writing API requests:
@@ -723,10 +733,12 @@ or filtered to successful tasks, provider errors, or answers with quality below
 tokens while dataset order remains the default. Sorting is stable, missing
 metrics stay at the end, and a single action clears every active control.
 
-Filtering and sorting happen in memory over the selected run detail. They do
-not trigger provider calls, change persisted results, or add network requests.
-Controls reset when another run is selected so that a model from the previous
-run cannot produce a misleading empty state.
+Filtering, sorting, and pagination execute in PostgreSQL through
+`GET /api/v1/runs/{run_id}/results/page`. Its bounded response includes
+`items`, `total`, `offset`, `limit`, and `has_more`. The frontend loads 25 rows
+by default and can switch to 50 or 100. Run polling requests only status and
+SQL-computed summaries, so it no longer transfers every saved output every 1.5
+seconds. These read-only requests never call a model provider or change results.
 
 ### Comparing Completed Runs
 
@@ -758,8 +770,11 @@ BI tools, and custom analysis scripts. UTF-8 BOM support keeps non-ASCII prompts
 readable in spreadsheet applications, and potentially executable spreadsheet
 formula prefixes are neutralized.
 
-All export files are assembled from already loaded browser data. Exporting does
-not call GroqCloud, create a database record, or add a backend endpoint.
+Run export explicitly walks the bounded result pages before assembling the
+complete browser-side JSON or CSV file, so the normal detail view stays light
+without producing partial downloads. Comparison exports need only the compact
+run summaries. Exporting never calls a model provider or creates a database
+record.
 
 Create a project from PowerShell:
 
@@ -940,7 +955,7 @@ workflow succeeds.
 
 ## Production Releases and HTTPS Deployment
 
-Pushing a semantic version tag such as `v0.34.0` starts
+Pushing a semantic version tag such as `v0.35.0` starts
 `.github/workflows/release.yml`. It reruns the complete CI quality gate, then
 builds Linux AMD64 and ARM64 API/frontend/backup images and publishes exact-version,
 minor-version, and stable `latest` tags to GitHub Container Registry. Published
@@ -992,7 +1007,7 @@ five minutes without stopping the API, worker, or frontend.
 Configure an off-site repository in `.env.production`:
 
 ```dotenv
-EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/llm-evaluation-platform-backup:0.34.0
+EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/llm-evaluation-platform-backup:0.35.0
 RESTIC_REPOSITORY=s3:https://s3.example.com/evalflow-production/postgres
 RESTIC_PASSWORD=replace-with-an-independent-encryption-password
 AWS_ACCESS_KEY_ID=replace-with-object-storage-access-key
@@ -1190,11 +1205,13 @@ real overview statistics, projects, recent runs, project creation, project
 workspaces, full dataset/test-case management, atomic file import, model-variant
 management, evaluation launch, live progress and cancellation, detailed result
 comparison, and live charts for the five primary performance dimensions.
-Individual task results also support prompt search, model and status filters,
-weak-answer detection, and metric sorting. Two completed runs can be compared
+Individual task results use bounded server-side pages with prompt search,
+model and status filters, weak-answer detection, and metric sorting. Dataset
+test cases load incrementally with an exact total. Live aggregate metrics are
+computed in SQL without loading all output bodies into backend memory. Two completed runs can be compared
 through overall and model-level quality, latency, token, cost, and error deltas.
 Selected runs and comparisons can be exported locally as JSON or CSV without
-new provider or backend requests. Backend requests, evaluation executions, and
+new provider requests. Backend requests, evaluation executions, and
 Celery tasks emit structured lifecycle logs with correlation identifiers.
 Prometheus endpoints expose bounded API/run/worker metrics, while `/ready`
 separately reports PostgreSQL and configured queue readiness. A reproducible
@@ -1237,7 +1254,7 @@ New accounts require email verification, and the password-recovery flow uses
 short-lived one-time tokens, generic request responses, and all-session
 revocation after a successful reset.
 
-Large-run pagination, durable email/notification delivery, automated
-error/alert notification delivery, cloud-specific
-infrastructure-as-code, object-storage immutability policy, a managed secret
-store, and the first public cloud deployment remain future stages.
+Final portfolio polish remains the next planned stage. Semantic similarity,
+LLM-as-a-Judge, durable notification delivery, a shared result cache, and
+public cloud deployment are optional post-v1.0 extensions rather than release
+requirements for this personal GitHub project.

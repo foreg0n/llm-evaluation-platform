@@ -171,6 +171,7 @@ def summarize_results(
         summaries.append(
             VariantSummary(
                 variant_name=variant.name,
+                result_count=len(variant_results),
                 average_exact_match=average("exact_match"),
                 average_normalized_exact_match=average(
                     "normalized_exact_match"

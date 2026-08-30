@@ -296,6 +296,117 @@ def test_run_rejects_duplicate_variant_ids(run_client) -> None:
     assert response.status_code == 422
 
 
+def test_result_pages_filter_sort_and_keep_run_overview_lightweight(
+    run_client,
+) -> None:
+    client, _ = run_client
+    project, dataset, variants = create_run_resources(
+        client, include_broken=True
+    )
+    for external_id, prompt, expected in [
+        ("alpha", "Alpha prompt", "5"),
+        ("beta", "Beta prompt", "4"),
+    ]:
+        created = client.post(
+            f"/api/v1/datasets/{dataset['id']}/items",
+            json={
+                "external_id": external_id,
+                "input": prompt,
+                "expected_output": expected,
+                "keywords": [expected],
+            },
+        )
+        assert created.status_code == 201
+
+    accepted = client.post(
+        "/api/v1/runs",
+        json={
+            "project_id": project["id"],
+            "dataset_id": dataset["id"],
+            "variant_ids": [variant["id"] for variant in variants],
+        },
+    ).json()
+    run = wait_for_terminal_run(client, accepted["id"])
+    assert run["completed_tasks"] == 6
+
+    overview = client.get(
+        f"/api/v1/runs/{run['id']}",
+        params={"include_results": "false"},
+    )
+    assert overview.status_code == 200
+    assert overview.json()["results"] == []
+    assert sorted(summary["result_count"] for summary in overview.json()["summary"]) == [
+        3,
+        3,
+    ]
+
+    first_page = client.get(
+        f"/api/v1/runs/{run['id']}/results/page",
+        params={"limit": 2},
+    )
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 6
+    assert len(first_page.json()["items"]) == 2
+    assert first_page.json()["has_more"] is True
+
+    searched = client.get(
+        f"/api/v1/runs/{run['id']}/results/page",
+        params={"search": "alpha"},
+    ).json()
+    assert searched["total"] == 2
+    assert {item["input"] for item in searched["items"]} == {"Alpha prompt"}
+
+    errors = client.get(
+        f"/api/v1/runs/{run['id']}/results/page",
+        params={"result_status": "errors"},
+    ).json()
+    assert errors["total"] == 3
+    assert all(item["error"] for item in errors["items"])
+
+    working_only = client.get(
+        f"/api/v1/runs/{run['id']}/results/page",
+        params={"variant_id": variants[0]["id"]},
+    ).json()
+    assert working_only["total"] == 3
+    assert {item["variant_id"] for item in working_only["items"]} == {
+        variants[0]["id"]
+    }
+
+    low_quality = client.get(
+        f"/api/v1/runs/{run['id']}/results/page",
+        params={"result_status": "low-quality", "sort": "quality-asc"},
+    ).json()
+    assert low_quality["total"] == 1
+    assert low_quality["items"][0]["input"] == "Alpha prompt"
+
+    quality_order = client.get(
+        f"/api/v1/runs/{run['id']}/results/page",
+        params={"sort": "quality-asc", "limit": 100},
+    ).json()["items"]
+    assert quality_order[0]["input"] == "Alpha prompt"
+    assert quality_order[0]["error"] is None
+    assert quality_order[-1]["error"] is not None
+
+    invalid = client.get(
+        f"/api/v1/runs/{run['id']}/results/page",
+        params={"limit": 101},
+    )
+    assert invalid.status_code == 422
+
+    registered = client.post(
+        "/api/v1/auth/register",
+        json={"email": "result-pages-other@example.com", "password": "test-password"},
+    )
+    assert registered.status_code == 201
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "result-pages-other@example.com", "password": "test-password"},
+    ).json()
+    client.headers.update({"Authorization": f"Bearer {login['access_token']}"})
+    forbidden = client.get(f"/api/v1/runs/{run['id']}/results/page")
+    assert forbidden.status_code == 404
+
+
 def test_running_evaluation_can_be_cancelled(run_client) -> None:
     client, _ = run_client
     project, dataset, variants = create_run_resources(

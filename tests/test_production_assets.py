@@ -97,7 +97,7 @@ def test_release_runs_ci_before_publishing_versioned_ghcr_images() -> None:
     }
     assert "ghcr.io/${{ github.repository }}-" in workflow_text
     assert "type=semver,pattern={{version}}" in workflow_text
-    assert "Release tag must look like v0.34.0" in workflow_text
+    assert "Release tag must look like v0.35.0" in workflow_text
     components = {
         entry["component"]
         for entry in jobs["publish"]["strategy"]["matrix"]["include"]

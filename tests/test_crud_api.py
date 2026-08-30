@@ -123,6 +123,31 @@ def test_dataset_and_item_crud(client: TestClient) -> None:
     assert listed.status_code == 200
     assert len(listed.json()) == 1
 
+    for index in (2, 3):
+        created = client.post(
+            f"/api/v1/datasets/{dataset['id']}/items",
+            json={
+                "external_id": f"question-{index}",
+                "input": f"Question {index}",
+                "expected_output": str(index),
+            },
+        )
+        assert created.status_code == 201
+    first_page = client.get(
+        f"/api/v1/datasets/{dataset['id']}/items/page",
+        params={"limit": 2},
+    )
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 3
+    assert len(first_page.json()["items"]) == 2
+    assert first_page.json()["has_more"] is True
+    last_page = client.get(
+        f"/api/v1/datasets/{dataset['id']}/items/page",
+        params={"offset": 2, "limit": 2},
+    ).json()
+    assert len(last_page["items"]) == 1
+    assert last_page["has_more"] is False
+
     assert client.delete(f"/api/v1/dataset-items/{item['id']}").status_code == 204
     assert client.delete(f"/api/v1/datasets/{dataset['id']}").status_code == 204
 
@@ -208,6 +233,51 @@ def test_import_json_document_metadata_and_reject_invalid_file(
     assert "input" in invalid.json()["detail"]
     datasets = client.get(f"/api/v1/projects/{project['id']}/datasets")
     assert [dataset["name"] for dataset in datasets.json()] == ["JSON benchmark"]
+
+
+def test_large_import_is_available_across_bounded_item_pages(
+    client: TestClient,
+) -> None:
+    project = create_project(client)
+    document = {
+        "name": "Large benchmark",
+        "items": [
+            {
+                "id": f"case-{index:03d}",
+                "input": f"Prompt {index}",
+                "expected_output": str(index),
+            }
+            for index in range(125)
+        ],
+    }
+    imported = client.post(
+        f"/api/v1/projects/{project['id']}/datasets/import",
+        files={
+            "file": (
+                "large-benchmark.json",
+                json.dumps(document),
+                "application/json",
+            )
+        },
+    )
+    assert imported.status_code == 201
+    dataset_id = imported.json()["dataset"]["id"]
+
+    first = client.get(
+        f"/api/v1/datasets/{dataset_id}/items/page",
+        params={"limit": 100},
+    ).json()
+    second = client.get(
+        f"/api/v1/datasets/{dataset_id}/items/page",
+        params={"offset": 100, "limit": 100},
+    ).json()
+
+    assert first["total"] == 125
+    assert len(first["items"]) == 100
+    assert first["has_more"] is True
+    assert len(second["items"]) == 25
+    assert second["has_more"] is False
+    assert len({item["id"] for item in first["items"] + second["items"]}) == 125
 
 
 def test_variant_crud_and_validation(client: TestClient) -> None:

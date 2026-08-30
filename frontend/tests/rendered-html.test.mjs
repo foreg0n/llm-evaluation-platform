@@ -57,3 +57,30 @@ test("discovers credential-scoped models while preserving manual entry", async (
   assert.match(workspaceSource, /Manual model IDs remain supported/);
   assert.match(apiSource, /export type ProviderModelCatalog/);
 });
+
+test("loads large run results through server-side pages and complete exports", async () => {
+  const [workspaceSource, apiSource] = await Promise.all([
+    readFile(new URL("../app/evaluation-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(workspaceSource, /include_results=false/);
+  assert.match(workspaceSource, /\/results\/page/);
+  assert.match(workspaceSource, /new URLSearchParams/);
+  assert.match(workspaceSource, /result_status/);
+  assert.match(workspaceSource, /fetchAllRunResults/);
+  assert.match(workspaceSource, /<option value=\{100\}>100<\/option>/);
+  assert.match(apiSource, /export type EvaluationResultPage/);
+});
+
+test("loads large datasets incrementally instead of truncating after fifty items", async () => {
+  const [dashboardSource, apiSource] = await Promise.all([
+    readFile(new URL("../app/dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(dashboardSource, /\/items\/page\?limit=50/);
+  assert.match(dashboardSource, /offset=\$\{itemOffset\}/);
+  assert.match(dashboardSource, /Load 50 more/);
+  assert.match(apiSource, /export type DatasetItemPage/);
+});

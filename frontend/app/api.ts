@@ -34,6 +34,14 @@ export type DatasetItem = {
   updated_at: string;
 };
 
+export type DatasetItemPage = {
+  items: DatasetItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+};
+
 export type DatasetImportResponse = {
   dataset: Dataset;
   item_count: number;
@@ -123,6 +131,7 @@ export type EvaluationResult = {
 
 export type EvaluationVariantSummary = {
   variant_name: string;
+  result_count: number;
   average_exact_match: number;
   average_normalized_exact_match: number;
   average_keyword_score: number;
@@ -140,6 +149,14 @@ export type EvaluationRunDetail = EvaluationRun & {
   variant_ids: string[];
   summary: EvaluationVariantSummary[];
   results: EvaluationResult[];
+};
+
+export type EvaluationResultPage = {
+  items: EvaluationResult[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
 };
 
 export type TokenResponse = {

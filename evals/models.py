@@ -64,6 +64,7 @@ class EvaluationResult(BaseModel):
 
 class VariantSummary(BaseModel):
     variant_name: str
+    result_count: int
     average_exact_match: float
     average_normalized_exact_match: float
     average_keyword_score: float

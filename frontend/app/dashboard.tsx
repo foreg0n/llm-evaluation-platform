@@ -7,6 +7,7 @@ import {
   type Dataset,
   type DatasetImportResponse,
   type DatasetItem,
+  type DatasetItemPage,
   type EvaluationRun,
   type ModelVariant,
   type Project,
@@ -59,6 +60,8 @@ export default function Dashboard({
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [variants, setVariants] = useState<ModelVariant[]>([]);
   const [items, setItems] = useState<DatasetItem[]>([]);
+  const [itemTotal, setItemTotal] = useState(0);
+  const [itemOffset, setItemOffset] = useState(0);
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogEntry[]>([]);
   const [providerCredentials, setProviderCredentials] = useState<ProviderCredential[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -157,6 +160,8 @@ export default function Dashboard({
     if (resetSection) setProjectSection("datasets");
     setSelectedDataset(null);
     setItems([]);
+    setItemTotal(0);
+    setItemOffset(0);
     setLoadingProject(true);
     setError("");
     try {
@@ -180,6 +185,8 @@ export default function Dashboard({
     setDatasets([]);
     setVariants([]);
     setItems([]);
+    setItemTotal(0);
+    setItemOffset(0);
     setError("");
   }
 
@@ -189,6 +196,8 @@ export default function Dashboard({
     setDatasets([]);
     setVariants([]);
     setItems([]);
+    setItemTotal(0);
+    setItemOffset(0);
     setShowProviderSettings(true);
     setError("");
   }
@@ -198,14 +207,40 @@ export default function Dashboard({
     setLoadingItems(true);
     setError("");
     try {
-      const itemList = await apiRequest<DatasetItem[]>(
-        `/api/v1/datasets/${dataset.id}/items`,
+      const page = await apiRequest<DatasetItemPage>(
+        `/api/v1/datasets/${dataset.id}/items/page?limit=50`,
         {},
         token,
       );
-      setItems(itemList);
+      setItems(page.items);
+      setItemTotal(page.total);
+      setItemOffset(page.items.length);
     } catch (caught) {
       handleFailure(caught, "Could not load dataset items.");
+    } finally {
+      setLoadingItems(false);
+    }
+  }
+
+  async function loadMoreItems() {
+    if (!selectedDataset || items.length >= itemTotal) return;
+    setLoadingItems(true);
+    try {
+      const page = await apiRequest<DatasetItemPage>(
+        `/api/v1/datasets/${selectedDataset.id}/items/page?offset=${itemOffset}&limit=50`,
+        {},
+        token,
+      );
+      setItems((current) => [
+        ...current,
+        ...page.items.filter(
+          (item) => !current.some((existing) => existing.id === item.id),
+        ),
+      ]);
+      setItemTotal(page.total);
+      setItemOffset((current) => current + page.items.length);
+    } catch (caught) {
+      handleFailure(caught, "Could not load more dataset items.");
     } finally {
       setLoadingItems(false);
     }
@@ -361,6 +396,8 @@ export default function Dashboard({
       );
       setSelectedDataset(null);
       setItems([]);
+      setItemTotal(0);
+      setItemOffset(0);
     } catch (caught) {
       handleFailure(caught, "Could not delete dataset.");
     } finally {
@@ -416,6 +453,7 @@ export default function Dashboard({
           token,
         );
         setItems((current) => [...current, created]);
+        setItemTotal((current) => current + 1);
       }
       setItemModal(null);
       setEditingItem(null);
@@ -437,6 +475,8 @@ export default function Dashboard({
         token,
       );
       setItems((current) => current.filter((entry) => entry.id !== item.id));
+      setItemTotal((current) => Math.max(0, current - 1));
+      setItemOffset((current) => Math.max(0, current - 1));
     } catch (caught) {
       handleFailure(caught, "Could not delete dataset item.");
     } finally {
@@ -595,11 +635,13 @@ export default function Dashboard({
         ) : selectedProject && projectSection === "datasets" ? (
           <ProjectWorkspace
             datasets={datasets}
+            itemTotal={itemTotal}
             items={items}
             loadingProject={loadingProject}
             loadingItems={loadingItems}
             onCreateDataset={openCreateDataset}
             onImportDataset={openImportDataset}
+            onLoadMoreItems={() => void loadMoreItems()}
             onCreateItem={openCreateItem}
             onDeleteDataset={() => void deleteDataset()}
             onDeleteItem={(item) => void deleteItem(item)}
@@ -804,13 +846,13 @@ function Metric({ label, value, note, icon, tone }: { label: string; value: stri
   return <article className="metric-card"><span className="metric-label">{label}</span><strong>{value}</strong><small>{note}</small><i className={`metric-orb ${tone}`}>{icon}</i></article>;
 }
 
-function ProjectWorkspace({ datasets, items, selectedDataset, projectRuns, loadingProject, loadingItems, onCreateDataset, onImportDataset, onSelectDataset, onEditDataset, onDeleteDataset, onCreateItem, onEditItem, onDeleteItem }: { datasets: Dataset[]; items: DatasetItem[]; selectedDataset: Dataset | null; projectRuns: EvaluationRun[]; loadingProject: boolean; loadingItems: boolean; onCreateDataset: () => void; onImportDataset: () => void; onSelectDataset: (dataset: Dataset) => void; onEditDataset: () => void; onDeleteDataset: () => void; onCreateItem: () => void; onEditItem: (item: DatasetItem) => void; onDeleteItem: (item: DatasetItem) => void }) {
+function ProjectWorkspace({ datasets, items, itemTotal, selectedDataset, projectRuns, loadingProject, loadingItems, onCreateDataset, onImportDataset, onLoadMoreItems, onSelectDataset, onEditDataset, onDeleteDataset, onCreateItem, onEditItem, onDeleteItem }: { datasets: Dataset[]; items: DatasetItem[]; itemTotal: number; selectedDataset: Dataset | null; projectRuns: EvaluationRun[]; loadingProject: boolean; loadingItems: boolean; onCreateDataset: () => void; onImportDataset: () => void; onLoadMoreItems: () => void; onSelectDataset: (dataset: Dataset) => void; onEditDataset: () => void; onDeleteDataset: () => void; onCreateItem: () => void; onEditItem: (item: DatasetItem) => void; onDeleteItem: (item: DatasetItem) => void }) {
   if (loadingProject) return <LoadingState label="Loading project datasets…" />;
   return (
     <>
       <section className="project-metrics">
         <Metric label="DATASETS" value={datasets.length} note="Benchmark collections" icon="▤" tone="purple" />
-        <Metric label="SELECTED ITEMS" value={selectedDataset ? items.length : "—"} note={selectedDataset ? selectedDataset.name : "Choose a dataset"} icon="≡" tone="blue" />
+        <Metric label="SELECTED ITEMS" value={selectedDataset ? itemTotal : "—"} note={selectedDataset ? selectedDataset.name : "Choose a dataset"} icon="≡" tone="blue" />
         <Metric label="PROJECT RUNS" value={projectRuns.length} note="Saved evaluations" icon="↗" tone="green" />
       </section>
       <section className="dataset-workspace">
@@ -835,6 +877,7 @@ function ProjectWorkspace({ datasets, items, selectedDataset, projectRuns, loadi
                       <tr key={item.id}><td><strong>{item.external_id}</strong><small>{shortId(item.id)}</small></td><td><span className="clamped-cell">{item.input}</span></td><td><span className="clamped-cell">{item.expected_output || "—"}</span></td><td><div className="keyword-list">{item.keywords.length ? item.keywords.slice(0, 3).map((keyword) => <span key={keyword}>{keyword}</span>) : <small>None</small>}</div></td><td><div className="row-actions"><button onClick={() => onEditItem(item)} type="button">Edit</button><button className="danger-text" onClick={() => onDeleteItem(item)} type="button">Delete</button></div></td></tr>
                     )) : <tr><td className="table-empty" colSpan={5}>This dataset has no test cases yet. Add a prompt and expected answer to begin.</td></tr>}</tbody>
                   </table>
+                  {items.length < itemTotal && <div className="dataset-pagination"><span>{items.length} of {itemTotal} test cases loaded</span><button className="secondary-button" disabled={loadingItems} onClick={onLoadMoreItems} type="button">{loadingItems ? "Loading…" : "Load 50 more"}</button></div>}
                 </div>
               )}
             </>

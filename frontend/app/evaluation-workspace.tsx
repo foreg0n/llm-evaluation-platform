@@ -6,12 +6,14 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
   apiRequest,
   type Dataset,
   type EvaluationResult,
+  type EvaluationResultPage,
   type EvaluationRun,
   type EvaluationRunDetail,
   type ModelVariant,
@@ -409,6 +411,7 @@ export function RunWorkspace({
   const [candidateRunId, setCandidateRunId] = useState("");
   const [comparison, setComparison] = useState<RunComparisonDetails | null>(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? null,
@@ -424,7 +427,7 @@ export function RunWorkspace({
   const loadDetail = useCallback(async (runId: string, quiet = false) => {
     if (!quiet) setLoadingDetail(true);
     try {
-      const next = await apiRequest<EvaluationRunDetail>(`/api/v1/runs/${runId}`, {}, token);
+      const next = await apiRequest<EvaluationRunDetail>(`/api/v1/runs/${runId}?include_results=false`, {}, token);
       setDetail(next);
       onRunChange(next);
       return next;
@@ -470,8 +473,8 @@ export function RunWorkspace({
     setLoadingComparison(true);
     try {
       const [baseline, candidate] = await Promise.all([
-        apiRequest<EvaluationRunDetail>(`/api/v1/runs/${baselineRunId}`, {}, token),
-        apiRequest<EvaluationRunDetail>(`/api/v1/runs/${candidateRunId}`, {}, token),
+        apiRequest<EvaluationRunDetail>(`/api/v1/runs/${baselineRunId}?include_results=false`, {}, token),
+        apiRequest<EvaluationRunDetail>(`/api/v1/runs/${candidateRunId}?include_results=false`, {}, token),
       ]);
       setComparison({ baseline, candidate });
       setShowCompare(false);
@@ -538,6 +541,20 @@ export function RunWorkspace({
     }
   }
 
+  async function exportRun(format: ExportFormat) {
+    if (!detail) return;
+    setExporting(true);
+    try {
+      const results = await fetchAllRunResults(detail.id, token);
+      downloadRun({ ...detail, results }, variants, format);
+      onNotice(`Complete ${format.toUpperCase()} export downloaded.`);
+    } catch (caught) {
+      onFailure(caught, "Could not export the complete evaluation run.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const progress = detail?.total_tasks
     ? Math.round((detail.completed_tasks / detail.total_tasks) * 100)
     : 0;
@@ -588,8 +605,8 @@ export function RunWorkspace({
                 <div><span className="panel-kicker">RUN_{shortId(detail.id).toUpperCase()}</span><h2>Model comparison</h2><p>{detail.completed_tasks} of {detail.total_tasks} tasks processed · concurrency {detail.concurrency}</p></div>
                 <div className="run-head-actions">
                   <div className="export-actions" aria-label="Export evaluation run">
-                    <button className="export-button" onClick={() => downloadRun(detail, variants, "json")} title="Download the complete run as JSON" type="button">↓ JSON</button>
-                    <button className="export-button" onClick={() => downloadRun(detail, variants, "csv")} title="Download result rows as CSV" type="button">↓ CSV</button>
+                    <button className="export-button" disabled={exporting} onClick={() => void exportRun("json")} title="Download the complete run as JSON" type="button">↓ JSON</button>
+                    <button className="export-button" disabled={exporting} onClick={() => void exportRun("csv")} title="Download result rows as CSV" type="button">↓ CSV</button>
                   </div>
                   <Status status={detail.status} />
                   {["pending", "running"].includes(detail.status) && <button className="danger-button" disabled={saving} onClick={() => void cancelRun()} type="button">Cancel run</button>}
@@ -597,9 +614,9 @@ export function RunWorkspace({
               </header>
               <div className="run-progress"><span><i style={{ width: `${progress}%` }} /></span><strong>{progress}%</strong></div>
               {detail.error && <div className="run-error">{detail.error}</div>}
-              <RunAnalytics detail={detail} variants={variants} />
+              <RunAnalytics detail={detail} />
               <SummaryTable detail={detail} />
-              <ResultsTable key={detail.id} results={detail.results} variants={variants} />
+              <ResultsTable completedTasks={detail.completed_tasks} key={detail.id} onFailure={onFailure} runId={detail.id} token={token} variantIds={detail.variant_ids} variants={variants} />
             </>
           ) : (
             <div className="detail-empty"><span>←</span><strong>Select an evaluation run</strong><p>Open a run to inspect live progress and model-by-model results.</p></div>
@@ -711,6 +728,25 @@ function deltaMarker(tone: ReturnType<typeof deltaTone>) {
 
 type ExportFormat = "json" | "csv";
 type CsvValue = string | number | boolean | null | undefined;
+
+async function fetchAllRunResults(runId: string, token: string) {
+  const results: EvaluationResult[] = [];
+  const limit = 100;
+  let offset = 0;
+  while (true) {
+    const page = await apiRequest<EvaluationResultPage>(
+      `/api/v1/runs/${runId}/results/page?offset=${offset}&limit=${limit}`,
+      {},
+      token,
+    );
+    results.push(...page.items);
+    if (!page.has_more) return results;
+    offset += page.items.length;
+    if (!page.items.length) {
+      throw new Error("Result export pagination did not advance.");
+    }
+  }
+}
 
 function csvCell(value: CsvValue) {
   if (value === null || value === undefined) return "";
@@ -969,12 +1005,8 @@ const analyticsMetrics: AnalyticsMetric[] = [
   },
 ];
 
-function RunAnalytics({ detail, variants }: { detail: EvaluationRunDetail; variants: ModelVariant[] }) {
-  const variantNames = new Map(variants.map((variant) => [variant.id, variant.name]));
-  const completedNames = new Set(
-    detail.results.map((result) => variantNames.get(result.variant_id)).filter((name): name is string => Boolean(name)),
-  );
-  const summaries = detail.summary.filter((summary) => completedNames.has(summary.variant_name));
+function RunAnalytics({ detail }: { detail: EvaluationRunDetail }) {
+  const summaries = detail.summary.filter((summary) => summary.result_count > 0);
 
   return (
     <section className="analytics-section" aria-labelledby="analytics-title">
@@ -1035,78 +1067,110 @@ function resultQuality(result: EvaluationResult) {
     : null;
 }
 
-function compareNullable(left: number | null, right: number | null, direction: 1 | -1) {
-  if (left === null && right === null) return 0;
-  if (left === null) return 1;
-  if (right === null) return -1;
-  return (left - right) * direction;
-}
-
-function ResultsTable({ results, variants }: { results: EvaluationResult[]; variants: ModelVariant[] }) {
+function ResultsTable({
+  runId,
+  completedTasks,
+  token,
+  variantIds,
+  variants,
+  onFailure,
+}: {
+  runId: string;
+  completedTasks: number;
+  token: string;
+  variantIds: string[];
+  variants: ModelVariant[];
+  onFailure: FailureHandler;
+}) {
+  const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [variantId, setVariantId] = useState("all");
   const [statusFilter, setStatusFilter] = useState<ResultStatusFilter>("all");
   const [sort, setSort] = useState<ResultSort>("default");
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
+  const [resultPage, setResultPage] = useState<EvaluationResultPage | null>(null);
+  const [loadingResults, setLoadingResults] = useState(false);
+  const resultRequest = useRef(0);
   const names = useMemo(() => new Map(variants.map((variant) => [variant.id, variant.name])), [variants]);
   const resultVariants = useMemo(() => {
-    const ids = [...new Set(results.map((result) => result.variant_id))];
-    return ids.map((id) => ({ id, name: names.get(id) ?? results.find((result) => result.variant_id === id)?.model ?? id })).sort((left, right) => left.name.localeCompare(right.name));
-  }, [names, results]);
-  const visibleResults = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
-    return results
-      .map((result, index) => ({ result, index }))
-      .filter(({ result }) => {
-        if (variantId !== "all" && result.variant_id !== variantId) return false;
-        if (query && !result.input.toLocaleLowerCase().includes(query)) return false;
-        if (statusFilter === "successful" && result.error) return false;
-        if (statusFilter === "errors" && !result.error) return false;
-        if (statusFilter === "low-quality") {
-          const quality = resultQuality(result);
-          if (quality === null || quality >= 0.67) return false;
-        }
-        return true;
-      })
-      .sort((left, right) => {
-        switch (sort) {
-          case "quality-asc": return compareNullable(resultQuality(left.result), resultQuality(right.result), 1) || left.index - right.index;
-          case "quality-desc": return compareNullable(resultQuality(left.result), resultQuality(right.result), -1) || left.index - right.index;
-          case "latency-asc": return (left.result.latency_ms - right.result.latency_ms) || left.index - right.index;
-          case "latency-desc": return (right.result.latency_ms - left.result.latency_ms) || left.index - right.index;
-          case "tokens-asc": return compareNullable(left.result.total_tokens, right.result.total_tokens, 1) || left.index - right.index;
-          case "tokens-desc": return compareNullable(left.result.total_tokens, right.result.total_tokens, -1) || left.index - right.index;
-          default: return left.index - right.index;
-        }
-      })
-      .map(({ result }) => result);
-  }, [results, search, sort, statusFilter, variantId]);
+    return variantIds
+      .map((id) => ({ id, name: names.get(id) ?? id }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [names, variantIds]);
+
+  const loadResults = useCallback(async () => {
+    const requestId = ++resultRequest.current;
+    setLoadingResults(true);
+    const params = new URLSearchParams({
+      offset: String(page * pageSize),
+      limit: String(pageSize),
+      result_status: statusFilter,
+      sort,
+    });
+    if (search) params.set("search", search);
+    if (variantId !== "all") params.set("variant_id", variantId);
+    try {
+      const next = await apiRequest<EvaluationResultPage>(
+        `/api/v1/runs/${runId}/results/page?${params.toString()}`,
+        {},
+        token,
+      );
+      if (requestId !== resultRequest.current) return;
+      setResultPage(next);
+      const lastPage = Math.max(0, Math.ceil(next.total / pageSize) - 1);
+      if (page > lastPage) setPage(lastPage);
+    } catch (caught) {
+      if (requestId !== resultRequest.current) return;
+      onFailure(caught, "Could not load evaluation result page.");
+    } finally {
+      if (requestId === resultRequest.current) setLoadingResults(false);
+    }
+  }, [onFailure, page, pageSize, runId, search, sort, statusFilter, token, variantId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadResults(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      resultRequest.current += 1;
+    };
+  }, [completedTasks, loadResults]);
+
+  const results = resultPage?.items ?? [];
+  const total = resultPage?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const firstVisible = total ? page * pageSize + 1 : 0;
+  const lastVisible = total ? Math.min(page * pageSize + results.length, total) : 0;
   const hasActiveFilters = Boolean(search) || variantId !== "all" || statusFilter !== "all" || sort !== "default";
 
   function clearFilters() {
+    setSearchDraft("");
     setSearch("");
     setVariantId("all");
     setStatusFilter("all");
     setSort("default");
+    setPage(0);
   }
 
   return (
     <section className="comparison-section results-section">
-      <div className="comparison-title"><div><span className="panel-kicker">TASK OUTPUTS</span><h3>Individual results</h3></div><small>{visibleResults.length} of {results.length} shown</small></div>
-      {results.length > 0 && (
+      <div className="comparison-title"><div><span className="panel-kicker">TASK OUTPUTS</span><h3>Individual results</h3></div><small>{loadingResults ? "Loading page…" : `${firstVisible}–${lastVisible} of ${total} matching`}</small></div>
+      {completedTasks > 0 && (
         <div className="result-controls" aria-label="Result filters">
-          <label className="result-search"><span>Search prompt</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a test case…" /></label>
-          <label><span>Model</span><select value={variantId} onChange={(event) => setVariantId(event.target.value)}><option value="all">All models</option>{resultVariants.map((variant) => <option key={variant.id} value={variant.id}>{variant.name}</option>)}</select></label>
-          <label><span>Result</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ResultStatusFilter)}><option value="all">All results</option><option value="successful">Successful</option><option value="errors">Errors only</option><option value="low-quality">Quality below 67%</option></select></label>
-          <label><span>Sort by</span><select value={sort} onChange={(event) => setSort(event.target.value as ResultSort)}><option value="default">Dataset order</option><option value="quality-asc">Quality: lowest first</option><option value="quality-desc">Quality: highest first</option><option value="latency-desc">Latency: slowest first</option><option value="latency-asc">Latency: fastest first</option><option value="tokens-desc">Tokens: highest first</option><option value="tokens-asc">Tokens: lowest first</option></select></label>
+          <form className="result-search" onSubmit={(event) => { event.preventDefault(); setPage(0); setSearch(searchDraft.trim()); }}><label><span>Search prompt</span><input maxLength={200} type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Find a test case…" /></label><button className="filter-submit-button" type="submit">Search</button></form>
+          <label><span>Model</span><select value={variantId} onChange={(event) => { setPage(0); setVariantId(event.target.value); }}><option value="all">All models</option>{resultVariants.map((variant) => <option key={variant.id} value={variant.id}>{variant.name}</option>)}</select></label>
+          <label><span>Result</span><select value={statusFilter} onChange={(event) => { setPage(0); setStatusFilter(event.target.value as ResultStatusFilter); }}><option value="all">All results</option><option value="successful">Successful</option><option value="errors">Errors only</option><option value="low-quality">Quality below 67%</option></select></label>
+          <label><span>Sort by</span><select value={sort} onChange={(event) => { setPage(0); setSort(event.target.value as ResultSort); }}><option value="default">Dataset order</option><option value="quality-asc">Quality: lowest first</option><option value="quality-desc">Quality: highest first</option><option value="latency-desc">Latency: slowest first</option><option value="latency-asc">Latency: fastest first</option><option value="tokens-desc">Tokens: highest first</option><option value="tokens-asc">Tokens: lowest first</option></select></label>
           {hasActiveFilters && <button className="clear-filter-button" onClick={clearFilters} type="button">× Clear</button>}
         </div>
       )}
       <div className="table-wrap"><table className="result-table"><thead><tr><th>Model</th><th>Prompt & output</th><th>Quality</th><th>Latency</th><th>Tokens</th><th>Retries / error</th></tr></thead><tbody>
-        {visibleResults.length ? visibleResults.map((result) => {
+        {results.length ? results.map((result) => {
           const quality = resultQuality(result);
           return <tr className={result.error ? "result-row-error" : quality !== null && quality < 0.67 ? "result-row-weak" : undefined} key={result.id}><td><strong>{names.get(result.variant_id) ?? result.model}</strong><small>{result.model}</small></td><td><details><summary>{result.input}</summary><div className="result-copy"><span>Expected</span><p>{result.expected_output || "—"}</p><span>Model output</span><p>{result.output || "—"}</p></div></details></td><td>{quality === null ? "—" : formatPercent(quality)}</td><td>{Math.round(result.latency_ms)} ms</td><td>{result.total_tokens ?? "—"}</td><td>{result.error ? <span className="result-error" title={result.error}>Error · {result.error}</span> : `${result.retry_count} retries`}</td></tr>;
-        }) : results.length ? <tr><td className="table-empty filtered-empty" colSpan={6}><strong>No matching results</strong><span>Change the filters or search phrase to see more tasks.</span><button className="text-button" onClick={clearFilters} type="button">Clear filters →</button></td></tr> : <tr><td className="table-empty" colSpan={6}>No task results have been saved yet.</td></tr>}
+        }) : total === 0 && hasActiveFilters ? <tr><td className="table-empty filtered-empty" colSpan={6}><strong>No matching results</strong><span>Change the filters or search phrase to see more tasks.</span><button className="text-button" onClick={clearFilters} type="button">Clear filters →</button></td></tr> : <tr><td className="table-empty" colSpan={6}>{loadingResults ? "Loading result page…" : "No task results have been saved yet."}</td></tr>}
       </tbody></table></div>
+      {total > 0 && <div className="result-pagination"><span>Page {page + 1} of {pageCount}</span><div><button disabled={page === 0 || loadingResults} onClick={() => setPage((current) => Math.max(0, current - 1))} type="button">← Previous</button><button disabled={!resultPage?.has_more || loadingResults} onClick={() => setPage((current) => current + 1)} type="button">Next →</button></div><label>Rows <select value={pageSize} onChange={(event) => { setPage(0); setPageSize(Number(event.target.value)); }}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label></div>}
     </section>
   );
 }

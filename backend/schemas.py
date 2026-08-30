@@ -161,6 +161,14 @@ class DatasetItemRead(ORMModel):
     updated_at: datetime
 
 
+class DatasetItemPage(BaseModel):
+    items: list[DatasetItemRead]
+    total: int
+    offset: int
+    limit: int
+    has_more: bool
+
+
 class DatasetImportRead(BaseModel):
     dataset: DatasetRead
     item_count: int
@@ -362,6 +370,7 @@ class EvaluationResultRead(ORMModel):
 
 class EvaluationVariantSummary(BaseModel):
     variant_name: str
+    result_count: int
     average_exact_match: float
     average_normalized_exact_match: float
     average_keyword_score: float
@@ -379,3 +388,11 @@ class EvaluationRunDetail(EvaluationRunRead):
     variant_ids: list[uuid.UUID]
     summary: list[EvaluationVariantSummary]
     results: list[EvaluationResultRead]
+
+
+class EvaluationResultPage(BaseModel):
+    items: list[EvaluationResultRead]
+    total: int
+    offset: int
+    limit: int
+    has_more: bool

@@ -277,6 +277,8 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 .danger-button:hover { border-color: rgb(242 111 125 / 0.5); background: rgb(242 111 125 / 0.11); }
 .item-table-wrap { overflow-x: auto; border-top: 1px solid var(--line); }
 .item-table { min-width: 790px; }
+.dataset-pagination { display: flex; min-width: 790px; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 17px; border-top: 1px solid var(--line); color: #697287; font-size: 8px; }
+.dataset-pagination .secondary-button { min-height: 34px; padding-inline: 12px; font-size: 8px; }
 .item-table th:nth-child(1) { width: 14%; }.item-table th:nth-child(2) { width: 29%; }.item-table th:nth-child(3) { width: 24%; }.item-table th:nth-child(4) { width: 20%; }.item-table th:nth-child(5) { width: 13%; }
 .clamped-cell { display: -webkit-box; max-width: 340px; overflow: hidden; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .keyword-list { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -452,6 +454,9 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 .result-controls input, .result-controls select { width: 100%; height: 36px; padding: 0 10px; border: 1px solid #2a3042; border-radius: 8px; color: #b7bdcc; background: #0d1019; outline: none; font: inherit; font-size: 9px; letter-spacing: 0; text-transform: none; }
 .result-controls input::placeholder { color: #535b6e; }
 .result-controls input:focus, .result-controls select:focus { border-color: var(--purple); box-shadow: 0 0 0 2px rgb(128 103 255 / 0.08); }
+.result-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px; }
+.filter-submit-button { height: 36px; padding: 0 10px; border: 1px solid rgb(128 103 255 / 0.36); border-radius: 8px; color: #b2a9f4; background: rgb(128 103 255 / 0.1); cursor: pointer; font-size: 8px; font-weight: 750; }
+.filter-submit-button:hover { background: rgb(128 103 255 / 0.17); }
 .clear-filter-button { height: 36px; padding: 0 10px; border: 1px solid #30364a; border-radius: 8px; color: #9e94df; background: #171a28; cursor: pointer; font-size: 8px; font-weight: 750; white-space: nowrap; }
 .clear-filter-button:hover { border-color: rgb(128 103 255 / 0.45); background: rgb(128 103 255 / 0.1); }
 .result-row-error { background: linear-gradient(90deg, rgb(242 111 125 / 0.045), transparent 38%); }
@@ -468,6 +473,12 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 .filtered-empty strong { color: #a8afbf; font-size: 10px; }
 .filtered-empty span { margin: 6px 0 3px; color: #61697c; font-size: 8px; }
 .filtered-empty .text-button { font-size: 9px; }
+.result-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px 18px; border-top: 1px solid #1d2230; color: #697287; font-size: 8px; }
+.result-pagination > div { display: flex; gap: 6px; }
+.result-pagination button { min-height: 32px; padding: 0 11px; border: 1px solid #2b3143; border-radius: 7px; color: #aab1c1; background: #111521; cursor: pointer; font-size: 8px; }
+.result-pagination button:disabled { cursor: not-allowed; opacity: 0.38; }
+.result-pagination label { display: flex; align-items: center; gap: 7px; }
+.result-pagination select { height: 32px; border: 1px solid #2b3143; border-radius: 7px; color: #aab1c1; background: #111521; font-size: 8px; }
 .variant-picker { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 13px; border: 1px solid #292f41; border-radius: 9px; }
 .variant-picker legend { padding: 0 5px; color: #8d95a8; font-size: 9px; font-weight: 700; }
 .variant-picker .variant-option { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 9px; padding: 9px; border-radius: 7px; background: #0e111a; }
@@ -549,6 +560,7 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
   .analytics-grid { grid-template-columns: 1fr; }
   .analytics-chart:last-child { grid-column: auto; }
   .result-controls { grid-template-columns: 1fr; }
+  .result-pagination { align-items: flex-start; flex-direction: column; }
   .clear-filter-button { width: 100%; }
   .section-intro { align-items: flex-start; flex-direction: column; }
   .section-actions { width: 100%; justify-content: flex-start; }

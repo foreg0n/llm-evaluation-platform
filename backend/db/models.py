@@ -13,6 +13,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Index,
     Numeric,
     String,
     Table,
@@ -342,6 +343,18 @@ class EvaluationResult(Base):
             name="uq_evaluation_results_run_item_variant",
         ),
         CheckConstraint("retry_count >= 0", name="nonnegative_retry_count"),
+        Index(
+            "ix_evaluation_results_run_dataset_item_variant",
+            "run_id",
+            "dataset_item_id",
+            "variant_id",
+            "id",
+        ),
+        Index(
+            "ix_evaluation_results_run_variant",
+            "run_id",
+            "variant_id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
