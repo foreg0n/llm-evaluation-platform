@@ -497,13 +497,6 @@ export default function Dashboard({
       action: showOverview,
     },
     {
-      label: "Settings",
-      icon: "⌁",
-      available: true,
-      active: showProviderSettings,
-      action: showProviders,
-    },
-    {
       label: "Datasets",
       icon: "▤",
       available: !!selectedProject,
@@ -511,18 +504,25 @@ export default function Dashboard({
       action: () => setProjectSection("datasets"),
     },
     {
-      label: "Models",
+      label: "Model configs",
       icon: "M",
       available: !!selectedProject,
       active: !!selectedProject && projectSection === "models",
       action: () => setProjectSection("models"),
     },
     {
-      label: "Evaluation runs",
+      label: "Runs",
       icon: "↗",
       available: !!selectedProject,
       active: !!selectedProject && projectSection === "runs",
       action: () => setProjectSection("runs"),
+    },
+    {
+      label: "Settings",
+      icon: "⌁",
+      available: true,
+      active: showProviderSettings,
+      action: showProviders,
     },
   ];
 
@@ -541,12 +541,12 @@ export default function Dashboard({
           <div>
             <span className="breadcrumb">
               {showProviderSettings
-                ? "Workspace / AI Providers"
+                ? "Workspace / Settings / AI providers"
                 : selectedProject
                 ? `Workspace / Projects / ${selectedProject.name} / ${projectSection}`
                 : "Workspace / Overview"}
             </span>
-            <h1>{showProviderSettings ? "AI provider credentials" : selectedProject?.name ?? "Evaluation overview"}</h1>
+            <h1>{showProviderSettings ? "Provider credentials" : selectedProject?.name ?? "Experiments"}</h1>
             {selectedProject?.description && (
               <p className="topbar-description">{selectedProject.description}</p>
             )}
@@ -569,21 +569,12 @@ export default function Dashboard({
             >
               ↻
             </button>
-            {selectedProject && projectSection === "datasets" && (
-              <button className="secondary-button" onClick={openImportDataset} type="button">
-                ⇧ Import file
-              </button>
-            )}
-            {((!selectedProject && !showProviderSettings) || projectSection === "datasets" && !!selectedProject) && <button
+            {!selectedProject && !showProviderSettings && <button
               className="primary-button"
-              onClick={
-                selectedProject
-                  ? openCreateDataset
-                  : () => setShowProjectModal(true)
-              }
+              onClick={() => setShowProjectModal(true)}
               type="button"
             >
-              <span>＋</span> {selectedProject ? "New dataset" : "New project"}
+              <span>＋</span> New project
             </button>}
           </div>
         </header>
@@ -813,11 +804,17 @@ function ProjectWorkspace({ datasets, items, itemTotal, selectedDataset, project
       </section>
       <section className="dataset-workspace">
         <aside className="panel dataset-list-panel">
-          <div className="panel-head"><div><span className="panel-kicker">COLLECTIONS</span><h2>Datasets</h2></div><button className="square-button" onClick={onCreateDataset} aria-label="Create dataset" type="button">＋</button></div>
+          <div className="panel-head">
+            <div><span className="panel-kicker">COLLECTIONS</span><h2>Datasets</h2></div>
+            <div className="collection-actions">
+              <button className="secondary-button" onClick={onImportDataset} type="button">⇧ Import file</button>
+              <button className="primary-button" onClick={onCreateDataset} type="button">＋ New dataset</button>
+            </div>
+          </div>
           <div className="dataset-list">
             {datasets.length ? datasets.map((dataset) => (
               <button className={`dataset-card${selectedDataset?.id === dataset.id ? " active" : ""}`} key={dataset.id} onClick={() => onSelectDataset(dataset)} type="button"><span className="dataset-icon">▤</span><span><strong>{dataset.name}</strong><small>{dataset.description || "No description"}</small></span><i>→</i></button>
-            )) : <div className="dataset-empty"><span>▤</span><strong>No datasets yet</strong><p>Create one manually or import a ready benchmark file.</p><div className="empty-actions"><button className="primary-button" onClick={onImportDataset} type="button">⇧ Import file</button><button className="secondary-button" onClick={onCreateDataset} type="button">Create manually</button></div></div>}
+            )) : <div className="dataset-empty"><span>▤</span><strong>No datasets yet</strong><p>Use the controls above to import a benchmark file or create a dataset manually.</p></div>}
           </div>
         </aside>
 

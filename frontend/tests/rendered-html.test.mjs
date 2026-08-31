@@ -44,6 +44,10 @@ test("server-renders the Evalflow authentication surface", async () => {
   assert.match(html, /Evalflow/);
   assert.match(html, /Welcome back/);
   assert.match(html, /LLM EVALUATION WORKSPACE/);
+  assert.match(html, /Evaluate models\./);
+  assert.match(html, /Ship with evidence\./);
+  assert.match(html, /SYSTEM READY/);
+  assert.match(html, /Import deterministic test cases/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview/);
 });
 
@@ -104,5 +108,14 @@ test("loads large datasets incrementally instead of truncating after fifty items
   assert.match(dashboardSource, /\/items\/page\?limit=50/);
   assert.match(dashboardSource, /offset=\$\{itemOffset\}/);
   assert.match(dashboardSource, /Load 50 more/);
+  assert.equal(
+    dashboardSource.match(/>⇧ Import file<\/button>/g)?.length ?? 0,
+    1,
+  );
+  assert.equal(
+    dashboardSource.match(/>＋ New dataset<\/button>/g)?.length ?? 0,
+    1,
+  );
+  assert.doesNotMatch(dashboardSource, /Create manually/);
   assert.match(apiSource, /export type DatasetItemPage/);
 });

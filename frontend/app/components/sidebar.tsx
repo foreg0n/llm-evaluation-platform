@@ -19,6 +19,26 @@ export function Sidebar({
   onToggle: () => void;
   userEmail?: string;
 }) {
+  const workspaceItems = items.filter((item) => item.label !== "Settings");
+  const settingsItems = items.filter((item) => item.label === "Settings");
+
+  function renderItem(item: SidebarItem) {
+    return (
+      <button
+        className={`nav-item${item.active ? " active" : ""}`}
+        disabled={!item.available}
+        key={item.label}
+        onClick={item.available ? item.action : undefined}
+        title={collapsed ? item.label : undefined}
+        type="button"
+      >
+        <span className="nav-icon">{item.icon}</span>
+        <span className="nav-label">{item.label}</span>
+        {!item.available && <small>select project</small>}
+      </button>
+    );
+  }
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -35,20 +55,10 @@ export function Sidebar({
         </button>
       </div>
       <nav aria-label="Main navigation">
-        {items.map((item) => (
-          <button
-            className={`nav-item${item.active ? " active" : ""}`}
-            disabled={!item.available}
-            key={item.label}
-            onClick={item.available ? item.action : undefined}
-            title={collapsed ? item.label : undefined}
-            type="button"
-          >
-            <span className="nav-icon">{item.icon}</span>
-            <span className="nav-label">{item.label}</span>
-            {!item.available && <small>select project</small>}
-          </button>
-        ))}
+        <span className="nav-section-label">Workspace</span>
+        {workspaceItems.map(renderItem)}
+        <span className="nav-section-label nav-section-secondary">Configuration</span>
+        {settingsItems.map(renderItem)}
       </nav>
       <div className="sidebar-bottom">
         <div className="api-status">

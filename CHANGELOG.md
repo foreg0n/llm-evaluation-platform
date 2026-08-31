@@ -5,6 +5,17 @@ All notable changes to Evalflow are documented here. The project follows
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced the visually unchanged authentication split-screen with a visibly
+  distinct evaluation-workspace entry screen, workflow map, compact access
+  card, system status chrome, and dedicated mobile layout.
+- Reorganized authenticated navigation into workspace and configuration groups
+  and tightened dashboard headers, metrics, tables, and interactive states.
+- Consolidated dataset creation and file import into one action pair in the
+  Collections panel, removing duplicate controls from the page header and
+  empty state.
+
 ## [0.37.0] - 2026-08-31
 
 ### Added
