@@ -1,0 +1,96 @@
+{
+  "name": "Evalflow Portfolio Benchmark",
+  "description": "A compact, deterministic benchmark for comparing instruction following, factual recall, arithmetic, and structured output across real language models.",
+  "items": [
+    {
+      "id": "geography-capital-france",
+      "input": "Return only the capital city of France.",
+      "expected_output": "Paris",
+      "keywords": ["Paris"]
+    },
+    {
+      "id": "geography-largest-ocean",
+      "input": "Return only the name of Earth's largest ocean.",
+      "expected_output": "Pacific Ocean",
+      "keywords": ["Pacific"]
+    },
+    {
+      "id": "science-water-freezing-point",
+      "input": "At standard atmospheric pressure, at what temperature does pure water freeze in degrees Celsius? Return only the number.",
+      "expected_output": "0",
+      "keywords": ["0"]
+    },
+    {
+      "id": "computing-cpu-acronym",
+      "input": "Expand the computing acronym CPU. Return only the expanded phrase.",
+      "expected_output": "Central Processing Unit",
+      "keywords": ["Central", "Processing", "Unit"]
+    },
+    {
+      "id": "arithmetic-multiplication",
+      "input": "Calculate 17 multiplied by 6. Return only the number.",
+      "expected_output": "102",
+      "keywords": ["102"]
+    },
+    {
+      "id": "arithmetic-percentage",
+      "input": "What is 25 percent of 80? Return only the number.",
+      "expected_output": "20",
+      "keywords": ["20"]
+    },
+    {
+      "id": "arithmetic-sequence",
+      "input": "Continue the sequence 2, 4, 8, 16 with its next number. Return only the number.",
+      "expected_output": "32",
+      "keywords": ["32"]
+    },
+    {
+      "id": "logic-prime-number",
+      "input": "Is 29 a prime number? Return only yes or no.",
+      "expected_output": "yes",
+      "keywords": ["yes"]
+    },
+    {
+      "id": "language-spanish-hello",
+      "input": "Translate the English word 'hello' into Spanish. Return one lowercase word.",
+      "expected_output": "hola",
+      "keywords": ["hola"]
+    },
+    {
+      "id": "language-antonym-ancient",
+      "input": "Give the most common one-word antonym of 'ancient'. Return one lowercase word.",
+      "expected_output": "modern",
+      "keywords": ["modern"]
+    },
+    {
+      "id": "sorting-alphabetical",
+      "input": "Sort these words alphabetically: pear, apple, banana. Return them separated by comma and one space.",
+      "expected_output": "apple, banana, pear",
+      "keywords": ["apple", "banana", "pear"]
+    },
+    {
+      "id": "format-uppercase",
+      "input": "Convert evalflow to uppercase. Return only the converted word.",
+      "expected_output": "EVALFLOW",
+      "keywords": ["EVALFLOW"]
+    },
+    {
+      "id": "format-json-status",
+      "input": "Return a compact JSON object with one field named status whose string value is ok. Do not use a Markdown code block.",
+      "expected_output": "{\"status\":\"ok\"}",
+      "keywords": ["status", "ok"]
+    },
+    {
+      "id": "format-three-colors",
+      "input": "Return exactly these three color names in this order, separated by a vertical bar with no spaces: red, green, blue.",
+      "expected_output": "red|green|blue",
+      "keywords": ["red", "green", "blue"]
+    },
+    {
+      "id": "instruction-single-word",
+      "input": "Reply with exactly one lowercase word that means the opposite of 'accept'.",
+      "expected_output": "reject",
+      "keywords": ["reject"]
+    }
+  ]
+}

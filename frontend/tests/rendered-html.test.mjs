@@ -1,23 +1,45 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-  return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
+  const port = 31_000 + (process.pid % 10_000);
+  const serverPath = fileURLToPath(
+    new URL("../dist/standalone/server.js", import.meta.url),
   );
+  const server = spawn(process.execPath, [serverPath], {
+    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port) },
+    stdio: "ignore",
+  });
+
+  try {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/`, {
+          headers: { accept: "text/html" },
+        });
+        return {
+          status: response.status,
+          contentType: response.headers.get("content-type") ?? "",
+          html: await response.text(),
+        };
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+    throw new Error("Standalone frontend did not become ready");
+  } finally {
+    server.kill();
+  }
 }
 
 test("server-renders the Evalflow authentication surface", async () => {
   const response = await render();
   assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-  const html = await response.text();
+  assert.match(response.contentType, /^text\/html\b/i);
+  const { html } = response;
   assert.match(html, /<title>Evalflow — LLM Evaluation Platform<\/title>/i);
   assert.match(html, /Evalflow/);
   assert.match(html, /Welcome back/);

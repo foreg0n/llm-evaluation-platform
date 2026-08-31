@@ -1,3 +1,4 @@
+import logging
 from contextlib import suppress
 from typing import Annotated, Literal
 
@@ -12,6 +13,7 @@ from backend.config import Settings, get_settings
 from backend.db.session import get_db_session
 from backend.metrics import READINESS_CHECKS
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["health"])
 
 
@@ -74,8 +76,15 @@ async def readiness_check(
     try:
         await session.execute(text("SELECT 1"))
         database: Literal["reachable", "unreachable"] = "reachable"
-    except Exception:
+    except Exception as exc:
         database = "unreachable"
+        logger.warning(
+            "readiness_database_check_failed",
+            extra={
+                "event": "readiness_database_check_failed",
+                "error_type": type(exc).__name__,
+            },
+        )
 
     queue_ready = settings.task_backend == "inprocess" or broker == "reachable"
     is_ready = database == "reachable" and queue_ready

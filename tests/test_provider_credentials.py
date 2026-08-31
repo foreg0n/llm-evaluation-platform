@@ -28,6 +28,7 @@ from backend.main import create_app
 from backend.services.model_catalog import (
     ModelCatalogResult,
     ProviderModelCatalog,
+    _live_models,
     _model_ids,
     _model_request,
     get_provider_model_catalog,
@@ -209,6 +210,10 @@ def test_custom_provider_requires_base_url_and_test_is_explicit(
         "https://",
         "https://user:password@example.com/v1",
         "https://example.com/v1#secret",
+        "https://example.com/v1?token=secret",
+        "http://169.254.169.254/latest/meta-data",
+        "http://100.100.100.200/latest/meta-data",
+        "http://metadata.google.internal/computeMetadata/v1",
     ],
 )
 def test_custom_provider_rejects_unsafe_or_incomplete_base_urls(
@@ -237,6 +242,27 @@ def test_credential_cipher_rejects_another_installation_key() -> None:
 
     with pytest.raises(CredentialDecryptionError):
         another.decrypt(encrypted)
+
+
+def test_live_custom_model_discovery_blocks_metadata_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested = False
+
+    def unexpected_request(*_args: object, **_kwargs: object) -> None:
+        nonlocal requested
+        requested = True
+
+    monkeypatch.setattr("urllib.request.urlopen", unexpected_request)
+
+    with pytest.raises(ValueError, match="protected network address"):
+        _live_models(
+            "custom",
+            "private-key",
+            "http://169.254.169.254/v1",
+        )
+
+    assert requested is False
 
 
 def test_production_rejects_development_credential_encryption_key() -> None:

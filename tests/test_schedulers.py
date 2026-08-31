@@ -3,8 +3,8 @@ import sys
 import types
 import uuid
 
-from backend.services.schedulers import CeleryRunScheduler
 from backend.observability import reset_request_id, set_request_id
+from backend.services.schedulers import CeleryRunScheduler
 
 
 def test_celery_scheduler_publishes_and_revokes_without_network(

@@ -462,6 +462,39 @@ def test_password_reset_is_one_time_and_revokes_existing_sessions(
     assert old_refresh.status_code == 401
 
 
+def test_password_reset_commits_without_session_helper_side_effect(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    register(client)
+    requested = client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"email": "user@example.com"},
+    )
+    sender = client.app.state.auth_test_email_sender
+    reset_token = sender.password_reset_tokens["user@example.com"][-1]
+
+    async def revoke_without_commit(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "backend.api.auth.revoke_all_user_sessions",
+        revoke_without_commit,
+    )
+    changed = client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={"token": reset_token, "new_password": "new-test-password"},
+    )
+    logged_in = client.post(
+        "/api/v1/auth/login",
+        json={"email": "user@example.com", "password": "new-test-password"},
+    )
+
+    assert requested.status_code == 202
+    assert changed.status_code == 200
+    assert logged_in.status_code == 200
+
+
 def test_expired_password_reset_token_is_rejected(client: TestClient) -> None:
     register(client)
     client.post(

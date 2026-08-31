@@ -27,6 +27,8 @@ complete workflow.
   DeepSeek, xAI, Cohere, Together AI, Fireworks AI, Perplexity, Cerebras, and
   SambaNova
 - Custom OpenAI-compatible endpoint support
+- Metadata and link-local endpoint protection for custom provider URLs while
+  retaining local Ollama and private-network compatibility
 - Credential-scoped live model discovery with caching, safe fallbacks, and
   manual model-ID entry
 - Qwen 3.6 27B and GPT-OSS 20B compared in every default run
@@ -53,6 +55,8 @@ complete workflow.
 - SMTP delivery for deployments and console delivery for local development
 - Per-user project ownership and data isolation across every protected endpoint
 - Responsive React frontend with login, registration, and session handling
+- Compact developer-tool UI with a collapsible sidebar, flat high-contrast data
+  surfaces, visible keyboard focus, and mobile breakpoints
 - Live overview dashboard backed by the projects and evaluation-runs APIs
 - In-app project creation and browser-safe CORS configuration
 - Project workspaces with real dataset and test-case CRUD operations
@@ -79,6 +83,7 @@ complete workflow.
 - Optional privacy-safe Sentry error reporting for FastAPI and Celery failures
 - Read-only GitHub Actions CI for backend, frontend, migrations, Compose, and
   production container builds
+- CI-enforced Ruff checks and a production-only npm vulnerability audit
 - Weekly Dependabot updates for GitHub Actions, Python, npm, and Docker
 - Production-oriented Docker images and one-command full-stack Compose startup
 - Separate hardened production topology with automatic HTTPS through Caddy
@@ -91,6 +96,7 @@ complete workflow.
 - Idempotent Ubuntu VPS bootstrap with official Docker packages and SSH key access
 - Protected, serialized production deployments from exact Git tags
 - Pinned SSH host identity, pre-deploy backups, migrations, and public health gates
+- Reproducible portfolio benchmark, guided demo, and automated release audit
 
 ## Requirements
 
@@ -99,6 +105,25 @@ complete workflow.
 - An API key for at least one supported AI provider
 - PostgreSQL for the backend API
 - Docker Engine with Docker Compose for the containerized full stack
+
+## Quick Portfolio Demo
+
+After starting the full stack, import
+[`examples/portfolio-benchmark.json`](examples/portfolio-benchmark.json) from a
+project workspace and compare two real model variants. The benchmark contains
+15 deterministic test cases and no credentials. Follow the complete
+[five-minute demo guide](docs/DEMO.md) to show live execution, analytics,
+filtering, run comparison, and exports. Real evaluations consume provider API
+credits; the repository does not include a fake-model demo path.
+
+## Documentation
+
+- [Demo guide](docs/DEMO.md)
+- [Deployment and recovery guide](DEPLOYMENT.md)
+- [Release checklist](RELEASE_CHECKLIST.md)
+- [Changelog](CHANGELOG.md)
+- [Contribution guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 ## Installation
 
@@ -955,7 +980,7 @@ workflow succeeds.
 
 ## Production Releases and HTTPS Deployment
 
-Pushing a semantic version tag such as `v0.35.0` starts
+Pushing a semantic version tag such as `v0.37.0` starts
 `.github/workflows/release.yml`. It reruns the complete CI quality gate, then
 builds Linux AMD64 and ARM64 API/frontend/backup images and publishes exact-version,
 minor-version, and stable `latest` tags to GitHub Container Registry. Published
@@ -1007,7 +1032,7 @@ five minutes without stopping the API, worker, or frontend.
 Configure an off-site repository in `.env.production`:
 
 ```dotenv
-EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/llm-evaluation-platform-backup:0.35.0
+EVALFLOW_BACKUP_IMAGE=ghcr.io/foreg0n/llm-evaluation-platform-backup:0.37.0
 RESTIC_REPOSITORY=s3:https://s3.example.com/evalflow-production/postgres
 RESTIC_PASSWORD=replace-with-an-independent-encryption-password
 AWS_ACCESS_KEY_ID=replace-with-object-storage-access-key
@@ -1143,6 +1168,8 @@ llm-evaluation-platform/
 │   ├── scripts/
 │   │   └── deploy-production.sh
 │   └── Caddyfile
+├── docs/
+│   └── DEMO.md
 ├── evals/
 │   ├── datasets/
 │   │   └── questions.jsonl
@@ -1152,6 +1179,8 @@ llm-evaluation-platform/
 │   ├── providers.py
 │   ├── run.py
 │   └── runner.py
+├── examples/
+│   └── portfolio-benchmark.json
 ├── frontend/
 │   ├── app/
 │   │   ├── api.ts
@@ -1180,6 +1209,8 @@ llm-evaluation-platform/
 │   └── tempo/
 │       └── tempo.yml
 ├── artifacts/
+├── scripts/
+│   └── release_audit.py
 ├── tests/
 ├── .env.example
 ├── .env.production.example
@@ -1190,6 +1221,10 @@ llm-evaluation-platform/
 ├── compose.observability.yaml
 ├── compose.redis.yaml
 ├── .gitignore
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── RELEASE_CHECKLIST.md
+├── SECURITY.md
 ├── pyproject.toml
 └── README.md
 ```

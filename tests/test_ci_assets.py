@@ -2,7 +2,6 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -50,9 +49,12 @@ def test_ci_covers_backend_frontend_configuration_and_images() -> None:
         for step in job["steps"]
     )
     assert "python -m pytest" in all_runs
+    assert "python -m ruff check backend evals tests scripts" in all_runs
+    assert "python scripts/release_audit.py" in all_runs
     assert "alembic upgrade head --sql" in all_runs
     assert "npm ci" in all_runs
     assert "npm run lint" in all_runs
+    assert "npm run audit:production" in all_runs
     assert "npm test" in all_runs
     assert "docker compose config --quiet" in all_runs
     assert "compose.production.yaml config --quiet" in all_runs

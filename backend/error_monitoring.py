@@ -9,7 +9,6 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 from backend.config import Settings
 
-
 logger = logging.getLogger(__name__)
 FILTERED_VALUE = "[Filtered]"
 _SENSITIVE_KEYS = {

@@ -15,8 +15,8 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -42,6 +42,14 @@ from backend.security import (
     hash_password,
     verify_password,
 )
+from backend.services.account_tokens import (
+    RESET_PASSWORD,
+    VERIFY_EMAIL,
+    AccountTokenError,
+    consume_user_tokens,
+    get_valid_account_token,
+    issue_account_token,
+)
 from backend.services.auth_rate_limit import (
     AuthRateLimiterProtocol,
     get_auth_rate_limiter,
@@ -54,14 +62,6 @@ from backend.services.auth_sessions import (
     revoke_refresh_session,
     rotate_refresh_session,
     set_refresh_cookie,
-)
-from backend.services.account_tokens import (
-    AccountTokenError,
-    RESET_PASSWORD,
-    VERIFY_EMAIL,
-    consume_user_tokens,
-    get_valid_account_token,
-    issue_account_token,
 )
 from backend.services.email_delivery import (
     EmailSenderProtocol,
@@ -515,6 +515,10 @@ async def confirm_password_reset(
     user.email_verified_at = user.email_verified_at or now
     await consume_user_tokens(session, user.id, RESET_PASSWORD, now)
     await revoke_all_user_sessions(session, user.id)
+    # Keep transaction ownership explicit at the endpoint boundary. The
+    # session-revocation helper currently commits, but password persistence
+    # must not depend on that implementation detail.
+    await session.commit()
     return MessageResponse(
         message="Password updated. Sign in with your new password."
     )

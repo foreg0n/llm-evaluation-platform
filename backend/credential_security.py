@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from binascii import Error as BinasciiError
 import json
+from binascii import Error as BinasciiError
 from functools import lru_cache
 from typing import TypedDict
 

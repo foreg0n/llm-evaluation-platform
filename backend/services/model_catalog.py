@@ -12,6 +12,7 @@ from typing import Callable, Literal, Protocol
 
 from backend.config import get_settings
 from backend.credential_security import CredentialPayload
+from backend.network_security import validate_provider_endpoint
 from backend.provider_catalog import get_provider_definition
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,8 @@ def _live_models(
     url, headers = _model_request(provider, api_key, api_base)
     if url is None:
         return []
+    if provider == "custom":
+        validate_provider_endpoint(url)
 
     request = urllib.request.Request(url, headers=headers, method="GET")
     with urllib.request.urlopen(request, timeout=timeout_seconds) as response:

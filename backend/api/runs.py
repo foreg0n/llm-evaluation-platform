@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Literal
@@ -17,15 +18,19 @@ from backend.api.ownership import (
 )
 from backend.db.models import (
     DatasetItem,
-    EvaluationResult as DatabaseEvaluationResult,
     EvaluationRun,
     Project,
+)
+from backend.db.models import (
+    EvaluationResult as DatabaseEvaluationResult,
+)
+from backend.db.models import (
     Variant as DatabaseVariant,
 )
 from backend.db.session import get_db_session
 from backend.schemas import (
-    EvaluationResultRead,
     EvaluationResultPage,
+    EvaluationResultRead,
     EvaluationRunCreate,
     EvaluationRunDetail,
     EvaluationRunRead,
@@ -33,6 +38,7 @@ from backend.schemas import (
 )
 from backend.services.schedulers import RunScheduler, get_run_scheduler
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["evaluation runs"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
 SchedulerDependency = Annotated[RunScheduler, Depends(get_run_scheduler)]
@@ -491,9 +497,16 @@ async def cancel_evaluation_run(
 
     try:
         await scheduler.cancel(run_id)
-    except Exception:
+    except Exception as exc:
         # PostgreSQL is the source of truth. A queued or running worker will
         # observe the cancelled state even if Redis revoke is unavailable.
-        pass
+        logger.warning(
+            "evaluation_run_scheduler_cancel_failed",
+            extra={
+                "event": "evaluation_run_scheduler_cancel_failed",
+                "run_id": str(run_id),
+                "error_type": type(exc).__name__,
+            },
+        )
 
     return await get_owned_run(session, owner_id, run_id)

@@ -12,7 +12,6 @@ from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
 from backend.config import Settings
 
-
 logger = logging.getLogger(__name__)
 ExporterFactory = Callable[[Settings], SpanExporter]
 _tracer_provider: TracerProvider | None = None

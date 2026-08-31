@@ -1,7 +1,7 @@
 from celery import Celery
 from opentelemetry import trace
 from opentelemetry.instrumentation.celery import CeleryInstrumentor
-from opentelemetry.sdk.trace.export import SpanExportResult, SpanExporter
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from backend.config import Settings
 from backend.tracing import build_tracer_provider
@@ -47,7 +47,7 @@ def test_tracer_provider_exports_resource_metadata_without_network() -> None:
     assert len(exporter.spans) == 1
     resource = exporter.spans[0].resource.attributes
     assert resource["service.name"] == "test-worker"
-    assert resource["service.version"] == "0.35.0"
+    assert resource["service.version"] == "0.37.0"
     assert resource["deployment.environment.name"] == "test"
     provider.shutdown()
 

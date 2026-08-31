@@ -38,6 +38,10 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Compile Python packages
         run: python -m compileall -q backend evals
+      - name: Lint backend and tests
+        run: python -m ruff check backend evals tests scripts
+      - name: Audit release metadata and repository hygiene
+        run: python scripts/release_audit.py
       - name: Run network-free test suite
         env:
           TRACING_ENABLED: "false"
@@ -71,6 +75,8 @@ jobs:
         run: npm ci
       - name: Run ESLint
         run: npm run lint
+      - name: Audit production dependencies
+        run: npm run audit:production
       - name: Build and test production frontend
         run: npm test
 

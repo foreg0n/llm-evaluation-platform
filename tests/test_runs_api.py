@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -432,3 +433,42 @@ def test_running_evaluation_can_be_cancelled(run_client) -> None:
 
     assert cancelled.status_code == 200
     assert cancelled.json()["status"] == "cancelled"
+
+
+def test_scheduler_cancel_failure_is_logged_without_reverting_database_state(
+    run_client,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, _ = run_client
+    project, dataset, variants = create_run_resources(
+        client,
+        include_slow=True,
+    )
+    slow_variant = next(
+        variant for variant in variants if variant["name"] == "Slow model"
+    )
+    accepted = client.post(
+        "/api/v1/runs",
+        json={
+            "project_id": project["id"],
+            "dataset_id": dataset["id"],
+            "variant_ids": [slow_variant["id"]],
+        },
+    )
+    wait_for_run_status(client, accepted.json()["id"], "running")
+
+    class FailingCancelScheduler:
+        async def cancel(self, _run_id) -> None:
+            raise RuntimeError("queue unavailable")
+
+    client.app.dependency_overrides[get_run_scheduler] = (
+        lambda: FailingCancelScheduler()
+    )
+    with caplog.at_level(logging.WARNING, logger="backend.api.runs"):
+        cancelled = client.post(
+            f"/api/v1/runs/{accepted.json()['id']}/cancel"
+        )
+
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert "evaluation_run_scheduler_cancel_failed" in caplog.messages

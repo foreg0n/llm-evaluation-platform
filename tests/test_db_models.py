@@ -1,8 +1,8 @@
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-from backend.db.base import Base
 from backend.db import models  # noqa: F401
+from backend.db.base import Base
 
 
 def test_initial_schema_contains_all_domain_tables() -> None:

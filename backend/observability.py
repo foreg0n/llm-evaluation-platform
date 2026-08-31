@@ -17,7 +17,6 @@ from backend.error_monitoring import set_error_context
 from backend.metrics import observe_http_request
 from backend.tracing import current_trace_ids
 
-
 REQUEST_ID_HEADER = "X-Request-ID"
 _request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 _request_id_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -126,7 +125,7 @@ def configure_logging(settings: Settings) -> None:
     )
     if handler is None:
         handler = logging.StreamHandler()
-        setattr(handler, "_evalflow_handler", True)
+        handler._evalflow_handler = True
         root.addHandler(handler)
     handler.setLevel(level)
     if settings.log_format == "json":

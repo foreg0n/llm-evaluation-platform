@@ -135,16 +135,6 @@ def summarize_results(
             result for result in variant_results if result.metrics is not None
         ]
 
-        def average(metric_name: str) -> float:
-            if not successful:
-                return 0.0
-            values = [
-                getattr(result.metrics, metric_name)
-                for result in successful
-                if result.metrics is not None
-            ]
-            return sum(values) / len(values)
-
         average_quality = (
             sum(result.metrics.quality for result in successful if result.metrics)
             / len(successful)
@@ -172,11 +162,15 @@ def summarize_results(
             VariantSummary(
                 variant_name=variant.name,
                 result_count=len(variant_results),
-                average_exact_match=average("exact_match"),
-                average_normalized_exact_match=average(
+                average_exact_match=_average_metric(successful, "exact_match"),
+                average_normalized_exact_match=_average_metric(
+                    successful,
                     "normalized_exact_match"
                 ),
-                average_keyword_score=average("keyword_score"),
+                average_keyword_score=_average_metric(
+                    successful,
+                    "keyword_score",
+                ),
                 average_quality=average_quality,
                 average_latency_ms=average_latency,
                 total_input_tokens=total_input_tokens,
@@ -193,4 +187,18 @@ def summarize_results(
         )
 
     return summaries
+
+
+def _average_metric(
+    successful: list[EvaluationResult],
+    metric_name: str,
+) -> float:
+    if not successful:
+        return 0.0
+    values = [
+        getattr(result.metrics, metric_name)
+        for result in successful
+        if result.metrics is not None
+    ]
+    return sum(values) / len(values)
 

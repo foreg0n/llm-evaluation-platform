@@ -94,12 +94,12 @@ Commit and push the release-ready code, then create a semantic version tag:
 ```bash
 git switch main
 git pull --ff-only
-git tag -a v0.35.0 -m "Evalflow v0.35.0"
-git push origin v0.35.0
+git tag -a v0.37.0 -m "Evalflow v0.37.0"
+git push origin v0.37.0
 ```
 
 Wait for **Release container images** to succeed. Then open **Actions → Deploy
-production → Run workflow**, enter `0.35.0` and the literal confirmation
+production → Run workflow**, enter `0.37.0` and the literal confirmation
 `deploy-production`, and approve the `production` Environment review.
 
 The workflow checks out the exact tag, verifies the API/frontend/backup image
@@ -131,7 +131,7 @@ If GitHub Actions is unavailable, copy the exact tagged `compose.production.yaml
 ```bash
 cd /opt/evalflow
 chmod 0555 deploy/scripts/deploy-production.sh
-deploy/scripts/deploy-production.sh 0.35.0 foreg0n/llm-evaluation-platform
+deploy/scripts/deploy-production.sh 0.37.0 foreg0n/llm-evaluation-platform
 ```
 
 For a public repository, make all three GHCR packages public or grant the server

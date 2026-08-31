@@ -18,7 +18,6 @@ from backend.services.run_execution import execute_evaluation_run
 from backend.worker.celery_app import celery_app
 from evals.providers import generate
 
-
 logger = logging.getLogger(__name__)
 
 

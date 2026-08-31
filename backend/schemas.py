@@ -16,6 +16,8 @@ from pydantic import (
     model_validator,
 )
 
+from backend.network_security import validate_provider_endpoint
+
 Name = Annotated[str, Field(min_length=1, max_length=200)]
 LongName = Annotated[str, Field(min_length=1, max_length=300)]
 
@@ -246,6 +248,9 @@ def validate_provider_api_base(value: str | None) -> str | None:
         raise ValueError("api_base must not contain embedded credentials")
     if parsed.fragment:
         raise ValueError("api_base must not contain a URL fragment")
+    if parsed.query:
+        raise ValueError("api_base must not contain URL query parameters")
+    validate_provider_endpoint(normalized, resolve=False)
     return normalized
 
 

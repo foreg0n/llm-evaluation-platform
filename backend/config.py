@@ -8,7 +8,6 @@ from cryptography.fernet import Fernet
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 DEVELOPMENT_AUTH_SECRET = "development-only-change-this-auth-secret-key"
 DEVELOPMENT_CREDENTIAL_ENCRYPTION_KEY = (
     "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
@@ -25,7 +24,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "LLM Evaluation Platform"
-    app_version: str = "0.35.0"
+    app_version: str = "0.37.0"
     environment: str = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",

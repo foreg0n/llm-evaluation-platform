@@ -2,7 +2,6 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -97,7 +96,8 @@ def test_release_runs_ci_before_publishing_versioned_ghcr_images() -> None:
     }
     assert "ghcr.io/${{ github.repository }}-" in workflow_text
     assert "type=semver,pattern={{version}}" in workflow_text
-    assert "Release tag must look like v0.35.0" in workflow_text
+    assert "Release tag must look like v0.37.0" in workflow_text
+    assert "does not match pyproject version" in workflow_text
     components = {
         entry["component"]
         for entry in jobs["publish"]["strategy"]["matrix"]["include"]

@@ -16,6 +16,13 @@ import {
   type User,
 } from "./api";
 import { ModelWorkspace, RunWorkspace } from "./evaluation-workspace";
+import {
+  Dialog as Modal,
+  DialogActions as ModalActions,
+  LoadingState,
+  StatusBadge,
+} from "./components/ui";
+import { Sidebar } from "./components/sidebar";
 import { ProviderWorkspace } from "./provider-workspace";
 
 const shortId = (value: string) => value.slice(0, 8);
@@ -26,10 +33,6 @@ const formatDate = (value: string) =>
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-
-function StatusBadge({ status }: { status: EvaluationRun["status"] }) {
-  return <span className={`status status-${status}`}>{status}</span>;
-}
 
 type DatasetDraft = { name: string; description: string };
 type ItemDraft = {
@@ -89,6 +92,7 @@ export default function Dashboard({
   const [importDescription, setImportDescription] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const handleFailure = useCallback((caught: unknown, fallback: string) => {
     if (caught instanceof ApiError && caught.status === 401) {
@@ -486,14 +490,14 @@ export default function Dashboard({
 
   const nav = [
     {
-      label: "Overview",
+      label: "Experiments",
       icon: "◫",
       available: true,
       active: !selectedProject && !showProviderSettings,
       action: showOverview,
     },
     {
-      label: "AI Providers",
+      label: "Settings",
       icon: "⌁",
       available: true,
       active: showProviderSettings,
@@ -523,38 +527,14 @@ export default function Dashboard({
   ];
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">E</span>
-          <span>Evalflow</span>
-        </div>
-        <nav aria-label="Main navigation">
-          {nav.map((item) => (
-              <button
-                className={`nav-item${item.active ? " active" : ""}`}
-                disabled={!item.available}
-                key={item.label}
-                onClick={item.available ? item.action : undefined}
-                type="button"
-              >
-                <span className="nav-icon">{item.icon}</span>
-                {item.label}
-                {!item.available && <small>select project</small>}
-              </button>
-          ))}
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="api-status"><i /> API connected</div>
-          <button className="profile" onClick={onLogout} type="button">
-            <span>{user?.email.slice(0, 1).toUpperCase() ?? "U"}</span>
-            <div>
-              <strong>{user?.email.split("@")[0] ?? "Account"}</strong>
-              <small>Sign out</small>
-            </div>
-          </button>
-        </div>
-      </aside>
+    <main className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        items={nav}
+        onLogout={onLogout}
+        onToggle={() => setSidebarCollapsed((current) => !current)}
+        userEmail={user?.email}
+      />
 
       <section className="workspace">
         <header className="topbar">
@@ -783,30 +763,6 @@ export default function Dashboard({
         </Modal>
       )}
     </main>
-  );
-}
-
-function LoadingState({ label }: { label: string }) {
-  return <div className="dashboard-loading"><span /><p>{label}</p></div>;
-}
-
-function Modal({ children, onClose, titleId, wide = false }: { children: React.ReactNode; onClose: () => void; titleId: string; wide?: boolean }) {
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className={`modal${wide ? " modal-wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <button className="modal-close" onClick={onClose} aria-label="Close dialog" type="button">×</button>
-        {children}
-      </section>
-    </div>
-  );
-}
-
-function ModalActions({ saving, onCancel, label }: { saving: boolean; onCancel: () => void; label: string }) {
-  return (
-    <div className="modal-actions">
-      <button className="secondary-button" onClick={onCancel} type="button">Cancel</button>
-      <button className="primary-button" disabled={saving} type="submit">{saving ? "Saving…" : label}</button>
-    </div>
   );
 }
 

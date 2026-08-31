@@ -576,3 +576,170 @@ td > small { display: block; margin-top: 3px; color: #596174; font-size: 8px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* Dense developer-tool system */
+:root {
+  --ink: #e7e9ec;
+  --muted: #969ba3;
+  --muted-strong: #b7bbc1;
+  --canvas: #08090a;
+  --sidebar: #0a0b0c;
+  --surface: #0d0f10;
+  --surface-raised: #111315;
+  --line: #272a2e;
+  --purple: #7c6cf2;
+  --purple-bright: #9d91f7;
+  --blue: #78a8cf;
+  --green: #67b99a;
+  --red: #d77a82;
+}
+
+body { color: var(--ink); background: var(--canvas); font-weight: 400; }
+button, input, textarea, select, summary, a {
+  transition-duration: 160ms;
+  transition-property: color, background-color, border-color, opacity;
+  transition-timing-function: ease-out;
+}
+button:focus-visible, input:focus-visible, textarea:focus-visible,
+select:focus-visible, summary:focus-visible, a:focus-visible {
+  outline: 2px solid var(--purple-bright);
+  outline-offset: 2px;
+}
+
+.app-shell { grid-template-columns: 216px minmax(0, 1fr); transition: grid-template-columns 180ms ease-out; }
+.app-shell.sidebar-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+.sidebar { z-index: 10; padding: 16px 12px 12px; border-color: var(--line); background: var(--sidebar); }
+.sidebar .brand { position: relative; gap: 8px; padding: 0 4px 20px; font-size: 16px; font-weight: 510; }
+.brand-mark { width: 32px; height: 32px; flex: 0 0 32px; border: 1px solid #3c3765; border-radius: 6px; background: #1b1830; box-shadow: none; font-weight: 510; }
+.sidebar-toggle { display: grid; width: 24px; height: 24px; place-items: center; margin-left: auto; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--surface); cursor: pointer; }
+.sidebar-collapsed .brand-label, .sidebar-collapsed .nav-label,
+.sidebar-collapsed .nav-item small, .sidebar-collapsed .api-status,
+.sidebar-collapsed .profile div { display: none; }
+.sidebar-collapsed .sidebar-toggle { position: absolute; right: -8px; bottom: -8px; }
+.sidebar-collapsed .nav-item { grid-template-columns: 1fr; justify-items: center; padding: 0; }
+.sidebar-collapsed .profile { justify-content: center; padding: 4px; }
+.nav-item { grid-template-columns: 24px 1fr auto; min-height: 40px; padding: 0 8px; border-radius: 4px; color: var(--muted); font-size: 12px; font-weight: 450; }
+.nav-item:hover { color: var(--ink); background: #121416; }
+.nav-item.active { color: var(--ink); background: rgb(124 108 242 / 0.13); }
+.nav-item.active::before { left: -12px; width: 2px; height: 24px; border-radius: 0; box-shadow: none; }
+
+.workspace { padding: 24px 28px 40px; background: var(--canvas); }
+.topbar { align-items: center; margin-bottom: 20px; }
+.topbar h1, .panel-head h2, .comparison-title h3 { letter-spacing: -0.015em; font-weight: 510; }
+.primary-button, .secondary-button, .icon-button { min-height: 40px; border-radius: 4px; box-shadow: none; font-weight: 510; }
+.primary-button { padding: 0 12px; background: var(--purple); }
+.primary-button:hover { background: #8a7bf4; filter: none; transform: none; }
+.secondary-button, .icon-button { border-color: var(--line); background: var(--surface-raised); }
+.icon-button { width: 40px; height: 40px; }
+
+.metric-grid, .dashboard-grid, .project-grid, .run-layout, .analytics-grid { gap: 12px; }
+.metric-card, .panel, .analytics-card, .comparison-section, .run-list-card,
+.run-detail, .provider-card, .model-card { border-color: var(--line); border-radius: 6px; background: var(--surface); box-shadow: none; }
+.metric-card, .panel { padding: 12px; }
+.metric-card { min-height: 112px; }
+.metric-card > strong, .metric-value, .quality-value, table td,
+.result-pagination, .summary-grid { font-variant-numeric: tabular-nums; }
+.metric-orb, .profile > span, .status, .period-pill, .live-pill { border-radius: 4px; box-shadow: none; }
+.panel-kicker, .metric-label, .eyebrow, .preview-kicker { color: var(--muted); font-weight: 510; letter-spacing: 0.08em; }
+.table-wrap, .preview-table, .format-help { border-color: var(--line); border-radius: 4px; box-shadow: none; }
+table th { padding: 8px 12px; color: var(--muted); background: #0b0d0e; font-size: 10px; font-weight: 510; }
+table td { padding: 8px 12px; border-color: #202327; font-size: 11px; }
+.result-copy, .result-table details, .format-help code, .modal textarea,
+.item-prompt, .item-answer { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; }
+
+.status-completed { color: #8bc9ae; background: rgb(103 185 154 / 0.1); }
+.status-running, .status-pending { color: #99b9d2; background: rgb(120 168 207 / 0.1); }
+.status-failed, .status-cancelled, .result-error { color: #dc9298; background: rgb(215 122 130 / 0.08); }
+.modal { border-color: #30343a; border-radius: 6px; background: #0d0f10; box-shadow: none; }
+.modal input, .modal textarea, .modal select, .result-controls input,
+.result-controls select { min-height: 40px; border-color: var(--line); border-radius: 4px; color: var(--ink); background: #0a0c0d; }
+.error-banner, .success-banner { border-radius: 4px; box-shadow: none; }
+
+.dashboard-loading { min-height: 240px; }
+.dashboard-loading .loading-skeleton { width: min(480px, 72%); height: 8px; border-radius: 4px; background: linear-gradient(90deg, #151719 25%, #24272a 50%, #151719 75%); background-size: 200% 100%; animation: skeleton-shift 1.4s ease-in-out infinite; }
+@keyframes skeleton-shift { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* Keep data surfaces flat and reserve colour for meaning. */
+.activity-bar, .progress-cell i, .run-progress i,
+.run-list-item > i b, .analytics-row > i b,
+.bar-running, .bar-pending, .bar-failed, .bar-cancelled,
+.chart-blue .analytics-row > i b, .chart-purple .analytics-row > i b,
+.chart-orange .analytics-row > i b, .chart-red .analytics-row > i b {
+  background: var(--purple);
+  box-shadow: none;
+}
+.analytics-row > i b { background: var(--green); }
+.bar-running, .bar-pending, .chart-blue .analytics-row > i b { background: var(--blue); }
+.bar-failed, .bar-cancelled, .chart-red .analytics-row > i b { background: var(--red); }
+.chart-orange .analytics-row > i b { background: #b88a62; }
+.project-avatar, .dataset-icon, .model-orb, .provider-logo,
+.file-drop-icon, .dataset-empty > span, .detail-empty > span,
+.stage-empty > span, .mini-empty > span {
+  border-radius: 4px;
+  background: rgb(124 108 242 / 0.1);
+  box-shadow: none;
+}
+.dataset-card.active, .run-list-item.active {
+  border-color: rgb(124 108 242 / 0.35);
+  background: rgb(124 108 242 / 0.1);
+}
+.comparison-metric-card, .analytics-section, .provider-intro {
+  background: var(--surface-raised);
+  box-shadow: none;
+}
+.result-row-error { background: rgb(215 122 130 / 0.04); }
+.result-row-weak { background: rgb(184 138 98 / 0.04); }
+
+.danger-button, .export-button, .comparison-close, .square-button,
+.filter-submit-button, .clear-filter-button, .result-pagination button,
+.result-pagination select, .dataset-pagination .secondary-button,
+.model-catalog-status .secondary-button, .modal-close {
+  min-height: 40px;
+  border-radius: 4px;
+  box-shadow: none;
+}
+.modal-close { width: 40px; height: 40px; }
+.export-button, .comparison-close, .square-button,
+.filter-submit-button, .clear-filter-button {
+  border-color: var(--line);
+  color: var(--muted-strong);
+  background: var(--surface-raised);
+}
+.file-drop, .format-help, .variant-picker,
+.comparison-route, .analytics-chart, .model-catalog-status,
+.credential-safety-note, .workflow-warning, .comparison-form-warning,
+.comparison-dataset-warning, .result-copy {
+  border-radius: 4px;
+  box-shadow: none;
+}
+.result-controls input, .result-controls select,
+.result-pagination select { min-height: 40px; }
+.run-list-item, .dataset-card, .project-row, .variant-picker .variant-option {
+  border-radius: 4px;
+}
+.provider-card > code { border-radius: 4px; }
+.analytics-empty > span, .api-status i, .live-pill i { box-shadow: none; }
+
+.panel p, .topbar-description, .result-copy,
+.provider-card > code, .format-help, table td { color: var(--muted-strong); }
+.section-intro, .panel-head, .comparison-title, .run-detail-head,
+.run-comparison-head { gap: 12px; }
+.panel-head, .comparison-title, .run-detail-head,
+.run-comparison-head, .analytics-section, .comparison-section { padding: 12px; }
+.comparison-route, .comparison-dataset-warning,
+.run-error, .analytics-empty { margin-right: 12px; margin-left: 12px; }
+
+@media (hover: hover) {
+  .secondary-button:hover, .icon-button:hover, .export-button:hover,
+  .square-button:hover, .comparison-close:hover { border-color: #464a51; background: #17191c; }
+}
+
+@media (max-width: 760px) {
+  .app-shell, .app-shell.sidebar-collapsed { grid-template-columns: 1fr; }
+  .sidebar { position: relative; height: auto; }
+  .sidebar-collapsed .brand-label, .sidebar-collapsed .nav-label,
+  .sidebar-collapsed .profile div { display: initial; }
+  .sidebar-collapsed .nav-item { grid-template-columns: 24px 1fr auto; justify-items: initial; padding: 0 8px; }
+  .sidebar-toggle { display: none; }
+  .workspace { padding: 20px 16px 32px; }
+}

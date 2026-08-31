@@ -22,7 +22,12 @@ jobs:
         shell: bash
         run: |
           if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must look like v0.35.0 or v0.35.0-rc.1" >&2
+            echo "Release tag must look like v0.37.0 or v0.37.0-rc.1" >&2
+            exit 1
+          fi
+          project_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [[ "${GITHUB_REF_NAME}" != "v${project_version}" ]]; then
+            echo "Release tag ${GITHUB_REF_NAME} does not match pyproject version v${project_version}" >&2
             exit 1
           fi
 

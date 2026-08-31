@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-evaluation-platform"
-version = "0.35.0"
+version = "0.37.0"
 description = "A full-stack multi-provider platform for evaluating language models"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -36,14 +36,25 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "aiosqlite>=0.21,<1",
-    "httpx>=0.28,<1",
+    "httpx2>=2.12,<3",
     "PyYAML>=6,<7",
     "pytest>=8.3,<9",
+    "ruff>=0.11,<1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "C90"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.setuptools.packages.find]
 include = ["backend*", "evals*"]

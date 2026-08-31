@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import uuid
 import hashlib
+import logging
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -11,6 +12,7 @@ from pwdlib import PasswordHash
 
 from backend.config import Settings
 
+logger = logging.getLogger(__name__)
 JWT_ALGORITHM = "HS256"
 password_hash = PasswordHash.recommended()
 REFRESH_TOKEN_BYTES = 48
@@ -25,7 +27,14 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, encoded_hash: str) -> bool:
     try:
         return password_hash.verify(password, encoded_hash)
-    except Exception:
+    except Exception as exc:
+        logger.debug(
+            "password_hash_verification_failed",
+            extra={
+                "event": "password_hash_verification_failed",
+                "error_type": type(exc).__name__,
+            },
+        )
         return False
 
 
