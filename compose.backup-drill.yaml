@@ -34,7 +34,7 @@ services:
       ENVIRONMENT: production
       DATABASE_URL: postgresql+asyncpg://postgres:drill-postgres-password@source-postgres:5432/llm_evaluation
       AUTH_SECRET_KEY: drill-auth-secret-key-with-at-least-32-characters
-      CREDENTIAL_ENCRYPTION_KEY: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+      CREDENTIAL_ENCRYPTION_KEY: ZXZhbGZsb3ctYmFja3VwLWRyaWxsLWtleS0wMDAwMDE=
     command: ["alembic", "upgrade", "head"]
     depends_on:
       source-postgres:

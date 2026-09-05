@@ -2,6 +2,8 @@ from pathlib import Path
 
 import yaml
 
+from backend.config import Settings
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -61,6 +63,16 @@ def test_production_compose_requires_secrets_and_authenticates_redis() -> None:
     assert "REDIS_PASSWORD" in environment["CELERY_RESULT_BACKEND"]
     assert environment["REFRESH_COOKIE_SECURE"] == "true"
     assert environment["AUTH_RATE_LIMIT_BACKEND"] == "redis"
+
+
+def test_backup_drill_migration_environment_is_production_safe() -> None:
+    environment = load_yaml(ROOT / "compose.backup-drill.yaml")["services"][
+        "migrate"
+    ]["environment"]
+
+    settings = Settings(_env_file=None, **environment)
+
+    assert settings.environment == "production"
 
 
 def test_caddy_terminates_https_and_keeps_internal_endpoints_private() -> None:
