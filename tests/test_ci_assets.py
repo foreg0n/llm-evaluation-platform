@@ -108,5 +108,7 @@ def test_dependabot_keeps_coupled_frontend_packages_compatible() -> None:
         "@types/react-dom",
     }
     assert npm["ignore"] == [
-        {"dependency-name": "typescript", "versions": [">=6.1.0"]}
+        {"dependency-name": "typescript", "versions": [">=6.1.0"]},
+        {"dependency-name": "@eslint/js", "versions": [">=10.0.0"]},
+        {"dependency-name": "eslint", "versions": [">=10.0.0"]},
     ]

@@ -10,7 +10,8 @@ All notable changes to Evalflow are documented here. The project follows
 - Updated Vinext and its RSC plugin together and grouped their future
   Dependabot updates so locked installs keep peer dependencies compatible.
 - Synchronized React client, DOM, server-component, and type packages, and
-  deferred TypeScript versions unsupported by the current ESLint toolchain.
+  deferred TypeScript and ESLint majors unsupported by the current linting
+  toolchain.
 - Made temporary PostgreSQL dump creation compatible with Alpine BusyBox so
   the encrypted backup and isolated restore CI drill can run end to end.
 - Replaced the visually unchanged authentication split-screen with a visibly
