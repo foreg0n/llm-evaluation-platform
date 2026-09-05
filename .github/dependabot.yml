@@ -22,6 +22,17 @@ updates:
         patterns:
           - vinext
           - "@vitejs/plugin-rsc"
+      react-runtime:
+        patterns:
+          - react
+          - react-dom
+          - react-server-dom-webpack
+          - "@types/react"
+          - "@types/react-dom"
+    ignore:
+      - dependency-name: typescript
+        versions:
+          - ">=6.1.0"
 
   - package-ecosystem: docker
     directory: /

@@ -90,3 +90,23 @@ def test_dependabot_tracks_every_dependency_ecosystem() -> None:
         entry["schedule"]["interval"] == "weekly"
         for entry in config["updates"]
     )
+
+
+def test_dependabot_keeps_coupled_frontend_packages_compatible() -> None:
+    config = load_yaml(ROOT / ".github" / "dependabot.yml")
+    npm = next(
+        entry
+        for entry in config["updates"]
+        if entry["package-ecosystem"] == "npm"
+    )
+
+    assert set(npm["groups"]["react-runtime"]["patterns"]) == {
+        "react",
+        "react-dom",
+        "react-server-dom-webpack",
+        "@types/react",
+        "@types/react-dom",
+    }
+    assert npm["ignore"] == [
+        {"dependency-name": "typescript", "versions": [">=6.1.0"]}
+    ]
