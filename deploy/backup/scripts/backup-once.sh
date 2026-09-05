@@ -24,8 +24,9 @@ require_positive_integer BACKUP_KEEP_WEEKLY
 require_positive_integer BACKUP_KEEP_MONTHLY
 
 mkdir -p "$BACKUP_STATE_DIR"
-dump_path="$(mktemp "/tmp/evalflow-postgres-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.dump")"
-trap 'rm -f "$dump_path"' EXIT HUP INT TERM
+dump_dir="$(mktemp -d /tmp/evalflow-backup-XXXXXX)"
+dump_path="$dump_dir/evalflow-postgres-$(date -u +%Y%m%dT%H%M%SZ).dump"
+trap 'rm -rf "$dump_dir"' EXIT HUP INT TERM
 
 log info backup_started "database=$PGDATABASE host=$PGHOST"
 pg_isready --quiet --host "$PGHOST" --username "$PGUSER" --dbname "$PGDATABASE"

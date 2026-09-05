@@ -23,6 +23,9 @@ def test_backup_image_combines_pinned_restic_and_postgres_tools() -> None:
 def test_backup_creates_custom_dump_encrypts_and_applies_retention() -> None:
     script = read_script("backup-once.sh")
 
+    assert "mktemp -d /tmp/evalflow-backup-XXXXXX" in script
+    assert 'dump_path="$dump_dir/evalflow-postgres-' in script
+    assert "XXXXXX.dump" not in script
     assert "pg_isready" in script
     assert "pg_dump" in script
     assert "--format=custom" in script

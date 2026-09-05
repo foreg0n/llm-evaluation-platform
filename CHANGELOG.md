@@ -7,6 +7,10 @@ All notable changes to Evalflow are documented here. The project follows
 
 ### Changed
 
+- Updated Vinext and its RSC plugin together and grouped their future
+  Dependabot updates so locked installs keep peer dependencies compatible.
+- Made temporary PostgreSQL dump creation compatible with Alpine BusyBox so
+  the encrypted backup and isolated restore CI drill can run end to end.
 - Replaced the visually unchanged authentication split-screen with a visibly
   distinct evaluation-workspace entry screen, workflow map, compact access
   card, system status chrome, and dedicated mobile layout.

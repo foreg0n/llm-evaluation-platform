@@ -17,6 +17,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      vinext-rsc:
+        patterns:
+          - vinext
+          - "@vitejs/plugin-rsc"
 
   - package-ecosystem: docker
     directory: /
