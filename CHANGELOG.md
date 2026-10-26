@@ -7,6 +7,8 @@ All notable changes to Evalflow are documented here. The project follows
 
 ### Changed
 
+- Split the project documentation into a concise GitHub overview and a linked
+  user/developer guide, with corrected setup, credential, API, and backup examples.
 - Updated Vinext and its RSC plugin together and grouped their future
   Dependabot updates so locked installs keep peer dependencies compatible.
 - Synchronized React client, DOM, server-component, and type packages, and
